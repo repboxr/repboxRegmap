@@ -8,7 +8,7 @@ example = function() {
   rstudioapi::filesPaneNavigate(project_dir)
   rme = rme_init(project_dir)
   rme = rme_eval_all(rme)
-  rme = rme_make_tab_report(rme)
+  rme = rme_make_report_df(rme)
   rme_save(rme)
   # Explore the created rme object
   ls(rme)

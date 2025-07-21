@@ -53,7 +53,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
     filter(!is.na(coef_val), !is.na(paren_val))
 
   if (NROW(mapped_pairs) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No coef/se pairs found to check."))
+    return(rme_df_descr(tibble::tibble(), "No coef/se pairs found to check.", test_type = "map_version_specific"))
   }
 
   # 4. Get all relevant regcoef data
@@ -71,7 +71,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
     filter(!is.na(reg_coef))
 
   if (NROW(all_potential_matches) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No regcoef entries for mapped runids."))
+    return(rme_df_descr(tibble::tibble(), "No regcoef entries for mapped runids.", test_type = "map_version_specific"))
   }
 
   # 6. Score each potential match
@@ -167,5 +167,5 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
   }
 
   issues = dplyr::bind_rows(issues_from_best, no_match_issues)
-  return(rme_df_descr(issues, "Issues from comparing table coef/se values with regcoef output."))
+  return(rme_df_descr(issues, "Issues from comparing table coef/se values with regcoef output.", test_type = "map_version_specific"))
 }

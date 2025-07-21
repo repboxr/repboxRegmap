@@ -33,7 +33,7 @@ rme_ev_single_col_reg = function(rme) {
       .groups = "drop"
     ) %>%
     filter(num_cols > 1 & !has_right_se) %>%
-    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.")
+    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "map_version_specific")
 
   return(df)
 }
@@ -59,7 +59,7 @@ rme_ev_multicol_reg_plausibility = function(rme) {
     distinct(map_version, tabid, runid)
 
   if (NROW(multicol_regs) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check."))
+    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check.", test_type = "map_version_specific"))
   }
 
   issues = multicol_regs %>%
@@ -69,7 +69,7 @@ rme_ev_multicol_reg_plausibility = function(rme) {
     summarise(cols_in_row = n_distinct(col), .groups = "drop_last") %>%
     summarise(max_cols_per_row = max(cols_in_row), .groups = "drop") %>%
     filter(max_cols_per_row == 1) %>%
-    rme_df_descr("Multi-column regressions where no row has values in more than one column.")
+    rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "map_version_specific")
 
   return(issues)
 }
@@ -95,7 +95,7 @@ rme_ev_overlapping_regs = function(rme) {
       .groups = "drop"
     ) %>%
     filter(n_runids > 1) %>%
-    rme_df_descr("Coefficient cells mapped to multiple regressions.")
+    rme_df_descr("Coefficient cells mapped to multiple regressions.", test_type = "map_version_specific")
 
   return(df)
 }
@@ -152,7 +152,7 @@ rme_ev_consistent_vertical_structure = function(rme) {
     filter(!is.na(row_class))
 
   if (NROW(mc_df_ext) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency."))
+    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency.", test_type = "map_version_specific"))
   }
 
   issues = mc_df_ext %>%
@@ -163,7 +163,7 @@ rme_ev_consistent_vertical_structure = function(rme) {
       .groups = "drop"
     ) %>%
     filter(n_diff_rows > 1) %>%
-    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').")
+    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "map_version_specific")
 
   return(issues)
 }
