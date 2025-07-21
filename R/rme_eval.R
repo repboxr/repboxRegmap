@@ -1,5 +1,3 @@
-# R/rme_eval_a.R
-
 # This file implements Module A: Integrity and Sanity Checks,
 # as described in the project's plan.md.
 
@@ -13,10 +11,10 @@ example = function() {
   df = rme_combine_ev_df(rme)
 }
 
-
 rme_steps_integrity = function() {
   c("runids_differ", "invalid_runids", "invalid_cellids", "non_reg_cmd")
 }
+
 
 #' Get all evaluation step names
 #' @export

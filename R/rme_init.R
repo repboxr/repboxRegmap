@@ -8,17 +8,19 @@ example = function() {
   rstudioapi::filesPaneNavigate(project_dir)
   rme = rme_init(project_dir)
   rme = rme_eval_all(rme)
+  rme = rme_make_tab_report(rme)
   rme_save(rme)
   # Explore the created rme object
   ls(rme)
   head(rme$mc_df)
   head(rme$wrong_numbers_df)
+
+
+  lapply(rme$evals, function(df) {
+    unique(df$tabid)
+  })
 }
 
-# TO DO: EVAL ALL
-rme_eval_all = function(rme, test_names=NULL) {
-
-}
 
 rme_init = function(project_dir, doc_type = "art") {
   restore.point("rme_init")

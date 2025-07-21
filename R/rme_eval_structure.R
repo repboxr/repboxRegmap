@@ -20,11 +20,12 @@ rme_steps_structure = function() {
 rme_ev_single_col_reg = function(rme) {
   restore.point("rme_ev_single_col_reg")
 
-  # Join se_position from cell_df into mc_df
-  mc_df_ext = rme$mc_df %>%
-    left_join(rme$cell_df %>% select(cellid, se_position), by = "cellid")
-
-  df = mc_df_ext %>%
+  # The `mc_df` should already contain `se_position` from the join in `rme_init`.
+  # A redundant join, as in the previous implementation, created problematic
+  # duplicate columns (e.g., se_position.x, se_position.y), causing the `summarise`
+  # to fail because the column `se_position` was no longer available.
+  # We now use `rme$mc_df` directly.
+  df = rme$mc_df %>%
     group_by(map_version, tabid, runid) %>%
     summarise(
       num_cols = n_distinct(col),

@@ -35,10 +35,10 @@ rme_steps_value = function() {
 rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch = 0.05) {
   restore.point("rme_ev_coef_se_match")
 
-  # 1. Get all coef-se pairs from the tables
+  # 1. Get all coef-se pairs from the tables, including tabid
   pairs_df = rme$cell_df %>%
     filter(reg_role == "se", !is.na(partner_cellid)) %>%
-    select(se_cellid = cellid, coef_cellid = partner_cellid, paren_val = num) %>%
+    select(tabid, se_cellid = cellid, coef_cellid = partner_cellid, paren_val = num) %>%
     left_join(rme$cell_df %>% select(coef_cellid=cellid, coef_val=num), by="coef_cellid")
 
   # 2. Join with mappings to get runids
@@ -137,7 +137,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
         paste0("Paren rel diff ", round(min_rel_dist_paren,3)," to ", best_paren_type, " ", round(best_paren_val, 4))
       )
     ) %>%
-    select(map_version, runid, cellid = issue_cellid, partner_cellid, issue, table_val, closest_reg_val, details)
+    select(map_version, tabid, runid, cellid = issue_cellid, partner_cellid, issue, table_val, closest_reg_val, details)
 
   # 9. Identify pairs that had no match at all (max score was 0)
   all_pairs_to_check = mapped_pairs %>% select(map_version, coef_cellid) %>% distinct()
@@ -147,8 +147,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
   no_match_issues = tibble::tibble()
   if(NROW(no_match_pairs) > 0) {
     closest_misses = no_match_pairs %>%
-      inner_join(mapped_pairs, by = c("map_version", "coef_cellid")) %>%
-      inner_join(matches_with_scores, by=c("map_version", "coef_cellid", "se_cellid", "runid", "coef_val", "paren_val")) %>%
+      inner_join(matches_with_scores, by = c("map_version", "coef_cellid")) %>%
       mutate(combined_dist = rel_dist_coef + min_rel_dist_paren) %>%
       group_by(map_version, coef_cellid) %>%
       filter(combined_dist == min(combined_dist, na.rm=TRUE)) %>%
@@ -164,7 +163,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
         details = paste0("No match found. Closest coef rel diff ", round(rel_dist_coef,3),
                          ", closest paren rel diff ", round(min_rel_dist_paren,3))
       ) %>%
-      select(map_version, runid, cellid = coef_cellid, partner_cellid, issue, table_val, closest_reg_val, details)
+      select(map_version, tabid, runid, cellid = coef_cellid, partner_cellid, issue, table_val, closest_reg_val, details)
   }
 
   issues = dplyr::bind_rows(issues_from_best, no_match_issues)
