@@ -7,6 +7,7 @@ example = function() {
   project_dir = "/home/rstudio/repbox/projects_gha_new/aejapp_10_4_6"
   rstudioapi::filesPaneNavigate(project_dir)
   rme = rme_init(project_dir)
+  rme = rme_eval_all(rme)
   rme_save(rme)
   # Explore the created rme object
   ls(rme)
