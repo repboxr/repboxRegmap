@@ -13,3 +13,9 @@ Description: Built for new repbox version
 License: MIT
 Encoding: UTF-8
 LazyData: true
+Depends: restorepoint, stringi, FuzzyProduction,
+   repboxDB, repboxUtils, dplyr, tidyr
+Imports: 
+    igraph,
+    purrr,
+    visNetwork
