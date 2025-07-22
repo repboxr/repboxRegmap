@@ -1,3 +1,8 @@
+first_or_na = function(x, na_val=NA_character_) {
+  if (NROW(x)==0) return(na_val)
+  return(first(x))
+}
+
 #' Add cell type info (coef, se) to cell_df
 #'
 #' This function applies heuristics to identify which cells in a table
@@ -66,9 +71,9 @@ rme_add_cell_reg_info = function(rme) {
     # In case a cell is both a coef and an se (unlikely but possible), prioritize coef
     group_by(cellid) %>%
     summarise(
-      reg_role = if_else("coef" %in% reg_role, "coef", "se"),
-      partner_cellid = first(stats::na.omit(partner_cellid)),
-      se_position = first(stats::na.omit(se_position))
+      reg_role = first_or_na(if_else("coef" %in% reg_role, "coef", "se")),
+      partner_cellid = first_or_na(stats::na.omit(partner_cellid)),
+      se_position = first_or_na(stats::na.omit(se_position))
     )
 
   cell_df = cell_df %>%

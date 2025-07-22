@@ -22,7 +22,7 @@ rme_add_eval = function(rme, eval_steps, ...) {
   ev_df = do.call(eval_fun_name, list(rme = rme, ...))
 
   if (!is.null(ev_df)) {
-    all_keys = c("map_version","prod_id","tabid","cellid","runid","script_line","code_line","script_num")
+    all_keys = c("map_version","tabid","reg_ind", "runid", "cellid","cellids")
     keys = all_keys %in% names(ev_df)
     names(keys) = all_keys
     rme$eval_keys[[eval_step]] = keys

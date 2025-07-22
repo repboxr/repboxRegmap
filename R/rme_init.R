@@ -6,9 +6,12 @@
 example = function() {
   project_dir = "/home/rstudio/repbox/projects_gha_new/aejapp_10_4_6"
   rstudioapi::filesPaneNavigate(project_dir)
+  options(warn=2)
   rme = rme_init(project_dir)
   rme = rme_eval_all(rme)
-  #rme = rme_make_report_df(rme)
+  outfile = file.path(project_dir,"fp","eval_art/rme_report.md")
+  str = rme_make_report(rme,outfile = outfile,long_descr = TRUE, map_version = "g25f-mocr--v0")
+  rstudioapi::filesPaneNavigate(outfile)
   rme_save(rme)
   # Explore the created rme object
   ls(rme)
@@ -77,7 +80,7 @@ rme_init = function(project_dir, doc_type = "art") {
     filter(!is.na(runid))
 
   mc_df = mc_df %>%
-    mutate(map_version = paste0(prod_id, ":", ver_id)) %>%
+    mutate(map_version = ver_id) %>%
     filter(!is.na(cellid), cellid != "") %>%
     # Select and reorder a common set of columns for the final unified data frame.
     select(

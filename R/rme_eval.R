@@ -46,12 +46,12 @@ rme_ev_runids_differ = function(rme) {
 
   # we store a string of all corresponding runid for a cell-map_version
   df_runs = mc_df %>%
-    dplyr::group_by(map_version, prod_id, tabid, cellid) %>%
+    dplyr::group_by(map_version, tabid, cellid) %>%
     dplyr::summarize(
       runids = paste0(sort(unique(runid)), collapse=","),
       .groups = "drop"
     ) %>%
-    dplyr::arrange(tabid, cellid, prod_id, map_version)
+    dplyr::arrange(tabid, cellid, map_version)
 
   # Find cellids where there is more than one unique runids string
   discrepancy_df = df_runs %>%
@@ -59,7 +59,7 @@ rme_ev_runids_differ = function(rme) {
     dplyr::filter(dplyr::n_distinct(runids) > 1) %>%
     dplyr::ungroup()
 
-  # The returned df has columns: map_version, prod_id, tabid, cellid, runids
+  # The returned df has columns: map_version, tabid, cellid, runids
   # and contains all map versions for cells that have discrepancies.
   # The reporting function will use this to generate per-version reports.
   discrepancy_df %>%
