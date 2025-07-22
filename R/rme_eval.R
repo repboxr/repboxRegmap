@@ -74,8 +74,9 @@ rme_ev_invalid_cellids = function(rme) {
 
   inv_df = mc_df %>%
     anti_join(cell_df, by="cellid") %>%
-    select(tabid, cellid, map_version, prod_id)  %>%
-    rme_df_descr("map versions with invalid cellids (cellids not in cell_df)", test_type = "map_version_specific")
+    select(map_version, tabid, reg_ind, cellid)  %>%
+    rme_df_merge_cellids() %>%
+    rme_df_descr("map versions with invalid cellids (cellids not in cell_df)", test_type = "flag")
   return(inv_df)
 }
 
@@ -85,8 +86,9 @@ rme_ev_invalid_runids = function(rme) {
   df = rme$mc_df %>%
     filter(!is.na(runid)) %>%
     filter(!runid %in% rme$run_df$runid) %>%
-    select(map_version, prod_id, tabid, cellid, invalid_runid=runid) %>%
-    rme_df_descr("mapped to non-existent runid", test_type = "map_version_specific")
+    select(map_version, tabid,reg_ind, cellid, runid=runid) %>%
+    rme_df_merge_cellids() %>%
+    rme_df_descr("mapped to non-existent runid", test_type = "flag")
 }
 
 # Check for mappings to commands that are not regressions
@@ -95,7 +97,8 @@ rme_ev_non_reg_cmd = function(rme) {
   df = rme$mc_df %>%
     # is_reg is pre-computed and joined into mc_df
     filter(!is.true(is_reg)) %>%
-    select(map_version, prod_id, tabid, cellid, runid, cmd, cmd_type, reg_runid) %>%
-    rme_df_descr("Mapped to a cmd that is not a regcmd. This is not neccessarily a wrong mapping but useful information, e.g. for post-estimation commands.", test_type = "map_version_specific")
+    select(map_version, tabid, reg_ind, cellid, runid, cmd, cmd_type, reg_runid) %>%
+    rme_df_merge_cellids() %>%
+    rme_df_descr("Mapped to a cmd that is not a regcmd. This is not neccessarily a wrong mapping but useful information, e.g. for post-estimation commands.", test_type = "note_flag")
   df
 }

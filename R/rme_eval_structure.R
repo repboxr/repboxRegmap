@@ -16,24 +16,21 @@ rme_steps_structure = function() {
 #' columns without such a horizontal "coef-se" structure.
 #'
 #' @param rme The rme object.
-#' @return A data frame of regressions violating the single-column principle.
+#' @return A data frame of regressions violating the single-column principle,
+#'   including a `cellids` column with all cells of the regression.
 rme_ev_single_col_reg = function(rme) {
   restore.point("rme_ev_single_col_reg")
 
-  # The `mc_df` should already contain `se_position` from the join in `rme_init`.
-  # A redundant join, as in the previous implementation, created problematic
-  # duplicate columns (e.g., se_position.x, se_position.y), causing the `summarise`
-  # to fail because the column `se_position` was no longer available.
-  # We now use `rme$mc_df` directly.
   df = rme$mc_df %>%
-    group_by(map_version, tabid, runid) %>%
+    group_by(map_version, tabid, reg_ind) %>%
     summarise(
+      cellids = paste(sort(unique(cellid)), collapse=","),
       num_cols = n_distinct(col),
       has_right_se = any(se_position == "right", na.rm = TRUE),
       .groups = "drop"
     ) %>%
     filter(num_cols > 1 & !has_right_se) %>%
-    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "map_version_specific")
+    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "flag")
 
   return(df)
 }
@@ -47,29 +44,42 @@ rme_ev_single_col_reg = function(rme) {
 #' assignment across rows.
 #'
 #' @param rme The rme object.
-#' @return A data frame of implausible multi-column regressions.
+#' @return A data frame of implausible multi-column regressions, including a
+#'   `cellids` column.
 rme_ev_multicol_reg_plausibility = function(rme) {
   restore.point("rme_ev_multicol_reg_plausibility")
 
-  # Identify regressions mapped to more than one column
+  # Identify regressions mapped to more than one column and get their cellids
   multicol_regs = rme$mc_df %>%
-    group_by(map_version, tabid, runid) %>%
-    filter(n_distinct(col) > 1) %>%
-    ungroup() %>%
-    distinct(map_version, tabid, runid)
+    group_by(map_version, tabid, reg_ind) %>%
+    filter(has_num, n_distinct(col) > 1) %>%
+    summarise(
+      cellids = paste(sort(unique(cellid)), collapse=","),
+      cols = paste(sort(unique(col)), collapse=","),
+      rows = paste(sort(unique(row)), collapse=","),
+      .groups="drop")
 
   if (NROW(multicol_regs) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check.", test_type = "map_version_specific"))
+    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check.", test_type = "flag"))
   }
 
-  issues = multicol_regs %>%
-    inner_join(rme$mc_df, by = c("map_version", "tabid", "runid")) %>%
+  # Find regressions where no row has numbers in more than one column
+  plausibility_check = rme$mc_df %>%
+    semi_join(multicol_regs, by = c("map_version", "tabid", "reg_ind")) %>%
     filter(has_num) %>%
-    group_by(map_version, tabid, runid, row) %>%
+    group_by(map_version, reg_ind, tabid, row) %>%
     summarise(cols_in_row = n_distinct(col), .groups = "drop_last") %>%
     summarise(max_cols_per_row = max(cols_in_row), .groups = "drop") %>%
-    filter(max_cols_per_row == 1) %>%
-    rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "map_version_specific")
+    filter(max_cols_per_row == 1)
+
+  if (NROW(plausibility_check) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No implausible multi-column regressions found.", test_type = "flag"))
+  }
+
+  # Join the issues with the cellids
+  issues = multicol_regs %>%
+    inner_join(plausibility_check, by = c("map_version", "tabid", "reg_ind")) %>%
+    rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "flag")
 
   return(issues)
 }
@@ -78,8 +88,8 @@ rme_ev_multicol_reg_plausibility = function(rme) {
 #' Check for overlapping coefficient cells.
 #'
 #' This check identifies cells that are heuristically classified as coefficients
-#' and are mapped to more than one regression run (`runid`) within the same
-#' table. This indicates an overlap, which is usually an error.
+#' and are mapped to more than one regression `reg_ind` or multiple `runid`
+#' within the same table. This indicates an overlap, which is usually an error.
 #'
 #' @param rme The rme object.
 #' @return A data frame of cells with overlapping coefficient mappings.
@@ -90,12 +100,14 @@ rme_ev_overlapping_regs = function(rme) {
     filter(reg_role == "coef") %>%
     group_by(map_version, tabid, cellid) %>%
     summarise(
+      n_reginds = n_distinct(reg_ind),
+      reg_inds = paste0(sort(unique(reg_ind)), collapse=","),
       n_runids = n_distinct(runid),
       runids = paste0(sort(unique(runid)), collapse=","),
       .groups = "drop"
     ) %>%
-    filter(n_runids > 1) %>%
-    rme_df_descr("Coefficient cells mapped to multiple regressions.", test_type = "map_version_specific")
+    filter(n_runids > 1 | n_reginds > 1) %>%
+    rme_df_descr("Coefficient cells mapped to multiple regressions.", test_type = "flag")
 
   return(df)
 }
@@ -138,7 +150,7 @@ rme_add_row_class = function(cell_df) {
 #' classifies rows based on keywords in the stub column.
 #'
 #' @param rme The rme object.
-#' @return A data frame of inconsistencies found.
+#' @return A data frame of inconsistencies found, including a `cellids` column.
 rme_ev_consistent_vertical_structure = function(rme) {
   restore.point("rme_ev_consistent_vertical_structure")
 
@@ -152,7 +164,7 @@ rme_ev_consistent_vertical_structure = function(rme) {
     filter(!is.na(row_class))
 
   if (NROW(mc_df_ext) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency.", test_type = "map_version_specific"))
+    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency.", test_type = "flag"))
   }
 
   issues = mc_df_ext %>%
@@ -160,10 +172,11 @@ rme_ev_consistent_vertical_structure = function(rme) {
     summarise(
       n_diff_rows = n_distinct(row),
       rows_used = paste0(sort(unique(row)), collapse = ","),
+      cellids = paste0(sort(unique(cellid)), collapse = ","),
       .groups = "drop"
     ) %>%
     filter(n_diff_rows > 1) %>%
-    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "map_version_specific")
+    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "flag")
 
   return(issues)
 }
