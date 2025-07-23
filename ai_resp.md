@@ -1,192 +1,322 @@
-An improved report structure will greatly enhance the usability of your evaluation framework. Grouping results by `map_version` and then `tabid` provides a much clearer, hierarchical view of the issues.
+Of course. It's a common issue that AI mappings can be incomplete. A dedicated test to flag missing standard errors, especially when they are clearly present in the table, is an excellent addition. This test will improve the ability to quickly identify and correct such omissions.
 
-I will implement this by rewriting the `rme_report.R` file. The new function will:
-1.  Structure the report with `map_version` as the main section and `tabid` as subsections.
-2.  Provide detailed, user-friendly explanations for each test when `long_descr=TRUE`.
-3.  Format the results within each test section as either a Markdown table for complex data or a more readable bulleted list for simpler findings.
-4.  Remove redundant `map_version` and `tabid` columns from the results tables/lists, as this information is now present in the section headers.
+Here are the changes to implement this new test:
 
-Here is the new implementation for `R/rme_report.R`:
+1.  I will create a new evaluation function, `rme_ev_missing_se_mapping`, and add it to `R/rme_eval_structure.R`. This function will identify mapped coefficients whose corresponding standard error cells were not included in the mapping.
+2.  As requested, this test will include a `would_match` column. It will check if the numeric value in the unmapped standard error cell is consistent with the regression output for the mapped coefficient, using the same robust rounding logic we developed previously.
+3.  I will add the new test to the list of structural checks in `rme_steps_structure`.
+4.  Finally, I will add a clear description for the new test to the reporting function in `R/rme_report.R`, so its results are easy to understand.
 
-!MODIFICATION R/rme_report.R
+Here are the detailed modifications:
+
+!MODIFICATION R/rme_eval_structure.R
 scope = "file"
-file = "R/rme_report.R"
+file = "R/rme_eval_structure.R"
 is_new_file = false
-description = '''Overhaul `rme_make_report` to generate a hierarchical report grouped by map_version, then table, then test. Adds long descriptions and smarter formatting of results.'''
+description = '''Adds a new test `rme_ev_missing_se_mapping` to find mapped coefficients where the corresponding SE cell was not mapped. Also updates `rme_steps_structure` to include this new test.'''
 ---
 ```r
-#' Create a markdown report of evaluation results
-#'
-#' This function generates a markdown-formatted report summarizing the issues
-#' found by the various evaluation steps. The report is structured hierarchically:
-#' first by map version, then by table ID, and finally by test.
-#'
-#' @param rme The `rme` object containing evaluation results in `rme$evals`.
-#' @param map_version An optional character vector of map versions to report on.
-#'   If `NULL`, results from all versions with issues are included.
-#' @param tabids A character vector of table IDs to include in the report.
-#'   If `NULL`, all tables with issues are included.
-#' @param test_names A character vector of specific evaluation step names to include.
-#'   If `NULL`, all completed evaluations are reported.
-#' @param ignore_tests A character vector of evaluation step names to exclude.
-#' @param long_descr A logical value. If `TRUE`, a detailed explanation for each
-#'   test is included in the report to help interpret the results. If `FALSE`,
-#'   a concise description is used.
-#' @param outfile An optional file path. If provided, the report is written to
-#'   this file.
-#' @return A string containing the markdown report.
+# R/rme_eval_structure.R
+
+# This file implements structural checks on the table mappings.
+
+#' A function to group all structural checks
 #' @export
-rme_make_report = function(rme, map_version = NULL, tabids = NULL, test_names = NULL, ignore_tests = NULL, long_descr = TRUE, outfile = NULL) {
-  restore.point("rme_make_report")
+rme_steps_structure = function() {
+  c("single_col_reg", "multicol_reg_plausibility", "overlapping_regs", "consistent_vertical_structure", "missing_se_mapping")
+}
 
-  # --- Helper Functions ---
+#' Check if regressions span multiple columns without justification.
+#'
+#' A regression should ideally be in a single column. An exception is when
+#' standard errors (or t-stats/p-values) are placed in the column to the
+#' right of the coefficient. This check flags regressions that span multiple
+#' columns without such a horizontal "coef-se" structure.
+#'
+#' @param rme The rme object.
+#' @return A data frame of regressions violating the single-column principle,
+#'   including a `cellids` column with all cells of the regression.
+rme_ev_single_col_reg = function(rme) {
+  restore.point("rme_ev_single_col_reg")
 
-  # Converts a data frame to a markdown table string
-  df_to_markdown = function(df) {
-    if (!is.data.frame(df) || NROW(df) == 0) return("")
-    # Clean strings for markdown
-    clean_string = function(s) {
-      s = as.character(s)
-      s[is.na(s)] = ""
-      s = stringi::stri_replace_all_fixed(s, "|", "&#124;")
-      s = stringi::stri_replace_all_regex(s, "[\r\n]+", " ")
-      s
-    }
-    df_char = as.data.frame(lapply(df, clean_string), stringsAsFactors = FALSE)
-    header = paste0("| ", paste(names(df_char), collapse = " | "), " |")
-    separator = paste0("|", paste(rep("---", ncol(df_char)), collapse = "|"), "|")
-    body_rows = apply(df_char, 1, function(row) paste0("| ", paste(row, collapse = " | "), " |"))
-    paste(c(header, separator, body_rows), collapse = "\n")
+  df = rme$mc_df %>%
+    group_by(map_version, tabid, reg_ind) %>%
+    summarise(
+      cellids = paste(sort(unique(cellid)), collapse=","),
+      num_cols = n_distinct(col),
+      has_right_se = any(se_position == "right", na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    filter(num_cols > 1 & !has_right_se) %>%
+    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "flag")
+
+  return(df)
+}
+
+#' Plausibility check for multi-column regressions.
+#'
+#' If a regression is correctly mapped to multiple columns, it's expected that
+#' for at least one row, there are values from that regression in multiple columns.
+#' This check flags cases where a regression spans multiple columns, but each row
+#' only contains values in a single column, suggesting a "slip" in column
+#' assignment across rows.
+#'
+#' @param rme The rme object.
+#' @return A data frame of implausible multi-column regressions, including a
+#'   `cellids` column.
+rme_ev_multicol_reg_plausibility = function(rme) {
+  restore.point("rme_ev_multicol_reg_plausibility")
+
+  # Identify regressions mapped to more than one column and get their cellids
+  multicol_regs = rme$mc_df %>%
+    group_by(map_version, tabid, reg_ind) %>%
+    filter(has_num, n_distinct(col) > 1) %>%
+    summarise(
+      cellids = paste(sort(unique(cellid)), collapse=","),
+      cols = paste(sort(unique(col)), collapse=","),
+      rows = paste(sort(unique(row)), collapse=","),
+      .groups="drop")
+
+  if (NROW(multicol_regs) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check.", test_type = "flag"))
   }
 
-  # Chooses a display format (table or list) for a given issue data frame
-  format_issues_md = function(df, test_name) {
-    # For certain tests, a list is more readable than a wide table
-    use_list_format = test_name %in% c("multicol_reg_plausibility", "invalid_cellids", "single_col_reg")
+  # Find regressions where no row has numbers in more than one column
+  plausibility_check = rme$mc_df %>%
+    semi_join(multicol_regs, by = c("map_version", "tabid", "reg_ind")) %>%
+    filter(has_num) %>%
+    group_by(map_version, reg_ind, tabid, row) %>%
+    summarise(cols_in_row = n_distinct(col), .groups = "drop_last") %>%
+    summarise(max_cols_per_row = max(cols_in_row), .groups = "drop") %>%
+    filter(max_cols_per_row == 1)
 
-    if (use_list_format) {
-      # Custom list format for specific tests
-      if (test_name == "multicol_reg_plausibility" && all(c("reg_ind", "cellids", "cols") %in% names(df))) {
-        items = purrr::pmap_chr(df, function(reg_ind, cellids, cols, ...) {
-          paste0("* **Reg. ", reg_ind, "**: Implausible structure for columns `", cols, "`. (Cells: `", cellids, "`)")
-        })
-        return(paste(items, collapse = "\n"))
-      }
-      if (test_name %in% c("invalid_cellids", "single_col_reg") && all(c("reg_ind", "cellids") %in% names(df))) {
-        items = purrr::map2_chr(df$reg_ind, df$cellids, ~paste0("* **Reg. ", .x, "**: Affects cells `", .y, "`"))
-        return(paste(items, collapse = "\n"))
-      }
-    }
-    # Default to a table for all other cases
-    return(df_to_markdown(df))
-  }
-  
-  # Descriptions for tests when long_descr = TRUE
-  long_descriptions = list(
-    runids_differ = "**Discrepancy Across Map Versions.** This test identifies cells that are mapped to *different* regression `runid`s by different AI mapping versions. This is a key indicator of disagreement between models and points to areas of uncertainty.",
-    invalid_runids = "**Invalid `runid` Mapping.** This test flags mappings that point to a `runid` that does not exist in the project's execution log (`run_df`). This is a critical integrity error, as the mapped regression output cannot be found.",
-    invalid_cellids = "**Invalid `cellid` Mapping.** This test flags mappings that reference a `cellid` that does not exist in the parsed table data (`cell_df`). This is a critical integrity error, indicating a hallucinated or malformed cell reference from the AI.",
-    non_reg_cmd = "**Mapping to Non-Regression Command.** This test identifies cells mapped to a Stata command that is not a primary regression command (e.g., `test`, `margins`, `summarize`). This is not necessarily an error—post-estimation results are often included in tables—but serves as an important note. The report shows the command type and the `runid` of the last preceding regression.",
-    coef_se_match = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. Issues can be `no_coef_match` (table coef not in output), `no_paren_match` (SE/t-stat/p-val mismatch), or `large_discrepancy` (match found, but difference exceeds rounding tolerance).",
-    single_col_reg = "**Regression Spans Multiple Columns.** Regressions are typically presented in a single column. This test flags regressions whose mapped cells span multiple columns without a clear structural reason (like having standard errors in an adjacent column). This often indicates that cells from different regressions have been incorrectly grouped together.",
-    multicol_reg_plausibility = "**Implausible Multi-Column Structure.** For a regression that legitimately spans multiple columns, we expect to find rows with numbers in more than one of those columns. This test flags multi-column regressions where every row *only* has a value in one column, suggesting a 'slip' where different rows of the same conceptual regression were incorrectly assigned to different columns.",
-    overlapping_regs = "**Overlapping Regression Mappings.** This test flags cells identified as coefficients that have been mapped to *more than one* regression within the *same* map version. This is almost always an error, as a single coefficient should belong to only one regression specification.",
-    consistent_vertical_structure = "**Inconsistent Summary Stat Rows.** This test checks for consistent table structure. It identifies summary statistics (like 'Observations' or 'R-squared') by keywords and flags cases where the same statistic appears on different row numbers across the columns of a single table. This points to a potentially messy or inconsistent table layout or a mapping error."
-  )
-
-  # --- Main Logic ---
-
-  # 1. Determine tests and get all evaluation data
-  all_ev_dfs = rme$evals
-  available_tests = names(all_ev_dfs)
-  tests_to_report = if (is.null(test_names)) available_tests else intersect(available_tests, test_names)
-  if (!is.null(ignore_tests)) tests_to_report = setdiff(tests_to_report, ignore_tests)
-
-  if (length(tests_to_report) == 0 || length(all_ev_dfs) == 0) {
-    msg = "No tests to report on (either none run, or all filtered out)."
-    if (!is.null(outfile)) writeLines(msg, outfile)
-    return(msg)
-  }
-  
-  # Filter all DFs based on top-level filters (if any) and combine to find relevant scopes
-  filtered_ev_list = lapply(all_ev_dfs[tests_to_report], function(df) {
-    if (is.null(df) || NROW(df) == 0) return(NULL)
-    if (!is.null(map_version) && "map_version" %in% names(df)) df = dplyr::filter(df, .data$map_version %in% .env$map_version)
-    if (!is.null(tabids) && "tabid" %in% names(df)) df = dplyr::filter(df, .data$tabid %in% .env$tabids)
-    if (NROW(df) > 0) df else NULL
-  })
-  filtered_ev_list = purrr::compact(filtered_ev_list)
-  if(length(filtered_ev_list) == 0) {
-     msg = "No issues found for the specified filters."
-     if (!is.null(outfile)) writeLines(msg, outfile)
-     return(msg)
+  if (NROW(plausibility_check) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No implausible multi-column regressions found.", test_type = "flag"))
   }
 
-  combined_issues = dplyr::bind_rows(filtered_ev_list)
-  
-  # Determine which map_versions and tabids to iterate through
-  versions_to_report = sort(unique(combined_issues$map_version))
-  
-  # 2. Build Report Header
-  report_parts = c("# Regression Mapping Evaluation Report")
-  if (!is.null(rme$project_dir)) report_parts = c(report_parts, paste0("**Project**: `", rme$project_dir, "`"))
-  report_parts = c(report_parts, "\n---")
-  
-  # 3. Iterate and Build Report Body
-  for (mv in versions_to_report) {
-    report_parts = c(report_parts, paste0("\n## Map Version: `", mv, "`"))
-    
-    version_issues = dplyr::filter(combined_issues, .data$map_version == .env$mv)
-    tables_in_version = sort(unique(version_issues$tabid))
+  # Join the issues with the cellids
+  issues = multicol_regs %>%
+    inner_join(plausibility_check, by = c("map_version", "tabid", "reg_ind")) %>%
+    rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "flag")
 
-    for (tid in tables_in_version) {
-      report_parts = c(report_parts, paste0("\n### Table `", tid, "`"))
-      any_issue_in_table = FALSE
-      
-      for (test in tests_to_report) {
-        if (!test %in% names(filtered_ev_list)) next
-        
-        test_df = filtered_ev_list[[test]]
-        
-        # Filter for current scope
-        current_issues = test_df %>%
-          dplyr::filter(.data$map_version == .env$mv, .data$tabid == .env$tid)
+  return(issues)
+}
 
-        if (NROW(current_issues) > 0) {
-          any_issue_in_table = TRUE
-          
-          # Test subsection header
-          report_parts = c(report_parts, paste0("\n#### Test: `", test, "`"))
-          
-          # Add description
-          descr = if (long_descr) long_descriptions[[test]] else attr(test_df, "descr")
-          if (!is.null(descr)) report_parts = c(report_parts, paste0("> ", descr))
-          
-          report_parts = c(report_parts, paste0("\n**Issues Found**: ", NROW(current_issues)))
 
-          # Format and add results
-          display_df = dplyr::select(current_issues, -any_of(c("map_version", "tabid")))
-          report_parts = c(report_parts, format_issues_md(display_df, test))
-        }
-      }
-      
-      if (!any_issue_in_table) {
-        report_parts = c(report_parts, "_No issues found for this table in this map version._")
-      }
-       report_parts = c(report_parts, "\n---")
-    }
+#' Check for overlapping coefficient cells.
+#'
+#' This check identifies cells that are heuristically classified as coefficients
+#' and are mapped to more than one regression `reg_ind` or multiple `runid`
+#' within the same table. This indicates an overlap, which is usually an error.
+#'
+#' @param rme The rme object.
+#' @return A data frame of cells with overlapping coefficient mappings.
+rme_ev_overlapping_regs = function(rme) {
+  restore.point("rme_ev_overlapping_regs")
+
+  df = rme$mc_df %>%
+    filter(reg_role == "coef") %>%
+    group_by(map_version, tabid, cellid) %>%
+    summarise(
+      n_reginds = n_distinct(reg_ind),
+      reg_inds = paste0(sort(unique(reg_ind)), collapse=","),
+      n_runids = n_distinct(runid),
+      runids = paste0(sort(unique(runid)), collapse=","),
+      .groups = "drop"
+    ) %>%
+    filter(n_runids > 1 | n_reginds > 1) %>%
+    rme_df_descr("Coefficient cells mapped to multiple regressions.", test_type = "flag")
+
+  return(df)
+}
+
+#' Classify table rows based on stub column keywords.
+#' @param cell_df The `cell_df` from an rme object.
+#' @return The `cell_df` with an added `row_class` column.
+rme_add_row_class = function(cell_df) {
+  restore.point("rme_add_row_class")
+
+  if ("row_class" %in% names(cell_df)) return(cell_df)
+
+  stub_df = cell_df %>%
+    filter(col == 1 | (col > 1 & lag(col, default=0) == 0) ) %>% # Stub is often col 1
+    mutate(text_clean = tolower(stringi::stri_replace_all_regex(text, "[^a-z0-9]", "")))
+
+  stub_df = stub_df %>%
+    mutate(
+      row_class = dplyr::case_when(
+        stringi::stri_detect_regex(text_clean, "observ|nobs|sampsize|numofobs") ~ "nobs",
+        stringi::stri_detect_regex(text_clean, "r2|rsquared|rsq") ~ "r2",
+        stringi::stri_detect_regex(text_clean, "fstat") ~ "fstat",
+        TRUE ~ NA_character_
+      )
+    ) %>%
+    select(tabid, row, row_class) %>%
+    filter(!is.na(row_class)) %>%
+    distinct(tabid, row, .keep_all = TRUE)
+
+  cell_df = cell_df %>%
+    left_join(stub_df, by = c("tabid", "row"))
+
+  return(cell_df)
+}
+
+#' Check for consistent vertical structure across regressions.
+#'
+#' This check verifies that rows for common statistics (like N. of observations,
+#' R-squared) appear consistently at the same row index across a table. It first
+#' classifies rows based on keywords in the stub column.
+#'
+#' @param rme The rme object.
+#' @return A data frame of inconsistencies found, including a `cellids` column.
+rme_ev_consistent_vertical_structure = function(rme) {
+  restore.point("rme_ev_consistent_vertical_structure")
+
+  # Add row class if not already present
+  if (!"row_class" %in% names(rme$cell_df)) {
+    rme$cell_df = rme_add_row_class(rme$cell_df)
   }
 
-  # 4. Finalize and Output
-  final_report = paste(report_parts, collapse = "\n\n")
-  final_report = stringi::stri_replace_all_regex(final_report, "(\n){3,}", "\n\n") # Clean up excess newlines
+  mc_df_ext = rme$mc_df %>%
+    left_join(rme$cell_df %>% select(cellid, row_class), by = "cellid") %>%
+    filter(!is.na(row_class))
 
-  if (!is.null(outfile)) {
-    writeLines(final_report, outfile)
-    cat(paste0("\nReport written to '", outfile, "'."))
+  if (NROW(mc_df_ext) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency.", test_type = "flag"))
   }
-  
-  invisible(final_report)
+
+  issues = mc_df_ext %>%
+    group_by(map_version, tabid, row_class) %>%
+    summarise(
+      n_diff_rows = n_distinct(row),
+      rows_used = paste0(sort(unique(row)), collapse = ","),
+      cellids = paste0(sort(unique(cellid)), collapse = ","),
+      .groups = "drop"
+    ) %>%
+    filter(n_diff_rows > 1) %>%
+    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "flag")
+
+  return(issues)
+}
+
+#' Check for unmapped standard errors.
+#'
+#' This check identifies mapped coefficients where their corresponding standard
+#' error cell (heuristically identified as the cell in parentheses below or
+#' to the right) has not been included in the same regression mapping.
+#' It also verifies if the numeric value in the unmapped SE cell would have
+#' matched the standard error, t-statistic, or p-value from the regression output.
+#'
+#' @param rme The rme object.
+#' @return A data frame of missing SE mappings, with a `would_match` column
+#'   indicating if the SE value is consistent with the regression output.
+rme_ev_missing_se_mapping = function(rme) {
+  restore.point("rme_ev_missing_se_mapping")
+
+  # 1. Identify all heuristically found coef-se pairs from cell_df
+  coef_se_pairs = rme$cell_df %>%
+    filter(reg_role == "coef", !is.na(partner_cellid)) %>%
+    select(coef_cellid = cellid, se_cellid = partner_cellid, tabid)
+
+  if (NROW(coef_se_pairs) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No coefficient-se pairs found in tables.", test_type = "flag"))
+  }
+
+  # 2. Identify all uniquely mapped cells (map_version, runid, cellid)
+  mapped_cells = rme$mc_df %>%
+    select(map_version, runid, cellid) %>%
+    distinct()
+
+  # 3. Join pairs with the mapped coefficients to find the runid for each coef
+  mapped_coefs = coef_se_pairs %>%
+    inner_join(mapped_cells, by = c("coef_cellid" = "cellid"), relationship = "many-to-many")
+
+  # 4. Create a lookup key for all mapped cells to efficiently check for existence
+  mapped_cells_lookup = mapped_cells %>%
+    mutate(key = paste(map_version, runid, cellid, sep = "--")) %>%
+    pull(key)
+
+  # 5. Filter for cases where the SE cell is NOT mapped to the same runid
+  missing_se_df = mapped_coefs %>%
+    mutate(se_key = paste(map_version, runid, se_cellid, sep = "--")) %>%
+    filter(!se_key %in% mapped_cells_lookup)
+
+  if (NROW(missing_se_df) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No missing SE mappings found.", test_type = "flag"))
+  }
+
+  # 6. For the missing SEs, check if their value would have matched the regression output
+  if (is.null(rme$parcels$regcoef$regcoef)) {
+     warning("`regcoef` parcel not found. Cannot check if missing SEs would match.")
+     # Return issues without the match check
+     issues = missing_se_df %>%
+       select(map_version, tabid, runid, coef_cellid, se_cellid) %>%
+       mutate(would_match = NA)
+  } else {
+    # Get numeric values and decimal places for the unmapped SE cells
+    se_cell_data = rme$cell_df %>%
+        filter(cellid %in% missing_se_df$se_cellid) %>%
+        select(se_cellid = cellid, paren_val = num, paren_deci = num_deci)
+
+    # Get relevant regression output
+    regcoef_df = rme$parcels$regcoef$regcoef %>%
+        select(runid, cterm, reg_se = se, reg_t = t, reg_p = p)
+
+    # Join missing SEs with their values and potential regression matches
+    check_df = missing_se_df %>%
+        left_join(se_cell_data, by = "se_cellid") %>%
+        filter(!is.na(paren_val)) %>%
+        left_join(regcoef_df, by = "runid", relationship = "many-to-many")
+
+    # Perform the check
+    match_results = check_df %>%
+        filter(!is.na(reg_se) | !is.na(reg_t) | !is.na(reg_p)) %>%
+        mutate(
+            paren_deci = tidyr::replace_na(paren_deci, 0),
+            is_perfect_se_match = (round(reg_se, paren_deci) == paren_val),
+            is_perfect_t_match = (round(reg_t, paren_deci) == paren_val),
+            is_perfect_p_match = (round(reg_p, paren_deci) == paren_val)
+        ) %>%
+        rowwise() %>%
+        mutate(
+            is_match = any(c(is_perfect_se_match, is_perfect_t_match, is_perfect_p_match), na.rm = TRUE)
+        ) %>%
+        ungroup()
+
+    # Summarize results for each missing SE
+    issue_summary = match_results %>%
+        group_by(map_version, tabid, runid, coef_cellid, se_cellid) %>%
+        summarise(would_match = any(is_match, na.rm = TRUE), .groups = "drop")
+
+    # Join back with the full list of missing SEs in case some had no value to check
+    issues = missing_se_df %>%
+        select(map_version, tabid, runid, coef_cellid, se_cellid) %>%
+        left_join(issue_summary, by = c("map_version", "tabid", "runid", "coef_cellid", "se_cellid")) %>%
+        mutate(would_match = tidyr::replace_na(would_match, FALSE))
+  }
+
+  # 7. Add reg_ind for better reporting and finalize
+  final_issues = issues %>%
+    left_join(
+      rme$mc_df %>% select(map_version, runid, coef_cellid = cellid, reg_ind) %>% distinct(),
+      by = c("map_version", "runid", "coef_cellid")
+    ) %>%
+    select(map_version, tabid, reg_ind, runid, coef_cellid, se_cellid, would_match) %>%
+    rme_df_descr("Mapped coefficients with unmapped standard errors.", test_type = "flag")
+
+  return(final_issues)
 }
 ```
-!END_MODIFICATION R/rme_report.R
+!END_MODIFICATION R/rme_eval_structure.R
+
+!MODIFICATION lines in R/rme_report.R
+scope = "lines"
+file = "R/rme_report.R"
+insert_after_lines = '''    consistent_vertical_structure = "**Inconsistent Summary Stat Rows.** This test checks for consistent table structure. It identifies summary statistics (like 'Observations' or 'R-squared') by keywords and flags cases where the same statistic appears on different row numbers across the columns of a single table. This points to a potentially messy or inconsistent table layout or a mapping error."'''
+description = '''Adds the description for the new `missing_se_mapping` test to the markdown report generator.'''
+---
+```
+,
+    missing_se_mapping = "**Unmapped Standard Error.** This test flags cases where a mapped coefficient cell has an associated standard error (a value in parentheses, typically below the coefficient) that was *not* included in the regression mapping. It also reports whether the numeric value of that unmapped SE would have been a correct match for the regression's output, helping to distinguish simple mapping omissions from more complex issues."
+```
+!END_MODIFICATION lines in R/rme_report.R

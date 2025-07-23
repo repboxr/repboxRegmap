@@ -140,6 +140,6 @@ rme_df_descr = function(df, descr, test_type = c("flag","discrepancy", "note_fla
 rme_df_merge_cellids = function(df) {
   by = setdiff(names(df),"cellid")
   df %>%
-    group_by(across(by)) %>%
-    summarize(cellids = paste0(cellid, collapse=","))
+    group_by(across(all_of(by))) %>%
+    summarize(cellids = paste0(cellid, collapse=","), .groups="drop")
 }

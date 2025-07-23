@@ -4,15 +4,17 @@
 # that will load and transform all data needed
 
 example = function() {
+  library(repboxRegmap)
   project_dir = "/home/rstudio/repbox/projects_gha_new/aejapp_10_4_6"
   rstudioapi::filesPaneNavigate(project_dir)
   options(warn=2)
+
   rme = rme_init(project_dir)
   rme = rme_eval_all(rme)
-  outfile = file.path(project_dir,"fp","eval_art/rme_report.md")
-  str = rme_make_report(rme,outfile = outfile,long_descr = TRUE, map_version = "g25f-mocr--v0")
-  rstudioapi::filesPaneNavigate(outfile)
   rme_save(rme)
+  outfile = file.path(project_dir,"fp","eval_art/rme_report.md")
+  str = rme_make_report(rme,outfile = outfile,long_descr = TRUE, map_version = "g25f-mocr--v0", tabid="2")
+  rstudioapi::filesPaneNavigate(outfile)
   # Explore the created rme object
   ls(rme)
   head(rme$mc_df)
@@ -39,13 +41,17 @@ rme_init = function(project_dir, doc_type = "art") {
   eval_dir = file.path(project_dir, "fp", paste0("eval_", doc_type))
 
   # table structure is best stored in cell_base
-  cell_df = FuzzyProduction::fp_pick_and_load_prod_df(fp_dir,"cell_base",add_fp_dir = FALSE,add_ids = FALSE)
+  cell_ver = repboxAI::rai_pick_tab_ver(fp_dir, "cell_base")
+  cell_df = fp_load_prod_df(ver_dir = cell_ver$ver_dir,add_ids = FALSE)
+
+  #cell_df = FuzzyProduction::fp_pick_and_load_prod_df(fp_dir,"cell_base",add_fp_dir = FALSE,add_ids = FALSE)
 
   rme = list(
     project_dir = project_dir,
     doc_type = doc_type,
     fp_dir = fp_dir,
     eval_dir = eval_dir,
+    cell_verid = cell_ver$ver_id,
     cell_df = cell_df,
     parcels = parcels
   )

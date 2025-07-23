@@ -7,7 +7,7 @@
 #' @param rme The `rme` object containing evaluation results in `rme$evals`.
 #' @param map_version An optional character vector of map versions to report on.
 #'   If `NULL`, results from all versions with issues are included.
-#' @param tabids A character vector of table IDs to include in the report.
+#' @param tabid A character vector of table IDs to include in the report.
 #'   If `NULL`, all tables with issues are included.
 #' @param test_names A character vector of specific evaluation step names to include.
 #'   If `NULL`, all completed evaluations are reported.
@@ -19,7 +19,7 @@
 #'   this file.
 #' @return A string containing the markdown report.
 #' @export
-rme_make_report = function(rme, map_version = NULL, tabids = NULL, test_names = NULL, ignore_tests = NULL, long_descr = TRUE, outfile = NULL) {
+rme_make_report = function(rme, map_version = NULL, tabid = NULL, test_names = NULL, ignore_tests = NULL, long_descr = TRUE, outfile = NULL) {
   restore.point("rme_make_report")
 
   # --- Helper Functions ---
@@ -70,7 +70,7 @@ rme_make_report = function(rme, map_version = NULL, tabids = NULL, test_names = 
     invalid_runids = "**Invalid `runid` Mapping.** This test flags mappings that point to a `runid` that does not exist in the project's execution log (`run_df`). This is a critical integrity error, as the mapped regression output cannot be found.",
     invalid_cellids = "**Invalid `cellid` Mapping.** This test flags mappings that reference a `cellid` that does not exist in the parsed table data (`cell_df`). This is a critical integrity error, indicating a hallucinated or malformed cell reference from the AI.",
     non_reg_cmd = "**Mapping to Non-Regression Command.** This test identifies cells mapped to a Stata command that is not a primary regression command (e.g., `test`, `margins`, `summarize`). This is not necessarily an error—post-estimation results are often included in tables—but serves as an important note. The report shows the command type and the `runid` of the last preceding regression.",
-    coef_se_match = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. Issues can be `no_coef_match` (table coef not in output), `no_paren_match` (SE/t-stat/p-val mismatch), or `large_discrepancy` (match found, but difference exceeds rounding tolerance).",
+    coef_se_match = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. A match is considered perfect if the code output, rounded to the number of decimal places shown in the table, equals the table value. Issues can be `no_coef_match` (table coef not in output within tolerance), `no_match_perhaps_wrong_sign` (a match is found if the sign is flipped), `no_paren_match` (SE/t-stat/p-val mismatch), or `rounding_error` (the values are very close but don't match exactly after rounding, suggesting a minor discrepancy).",
     single_col_reg = "**Regression Spans Multiple Columns.** Regressions are typically presented in a single column. This test flags regressions whose mapped cells span multiple columns without a clear structural reason (like having standard errors in an adjacent column). This often indicates that cells from different regressions have been incorrectly grouped together.",
     multicol_reg_plausibility = "**Implausible Multi-Column Structure.** For a regression that legitimately spans multiple columns, we expect to find rows with numbers in more than one of those columns. This test flags multi-column regressions where every row *only* has a value in one column, suggesting a 'slip' where different rows of the same conceptual regression were incorrectly assigned to different columns.",
     overlapping_regs = "**Overlapping Regression Mappings.** This test flags cells identified as coefficients that have been mapped to *more than one* regression within the *same* map version. This is almost always an error, as a single coefficient should belong to only one regression specification.",
@@ -94,8 +94,10 @@ rme_make_report = function(rme, map_version = NULL, tabids = NULL, test_names = 
   # Filter all DFs based on top-level filters (if any) and combine to find relevant scopes
   filtered_ev_list = lapply(all_ev_dfs[tests_to_report], function(df) {
     if (is.null(df) || NROW(df) == 0) return(NULL)
+    # Ungroup to prevent dplyr warnings during filtering
+    df = dplyr::ungroup(df)
     if (!is.null(map_version) && "map_version" %in% names(df)) df = dplyr::filter(df, .data$map_version %in% .env$map_version)
-    if (!is.null(tabids) && "tabid" %in% names(df)) df = dplyr::filter(df, .data$tabid %in% .env$tabids)
+    if (!is.null(tabid) && "tabid" %in% names(df)) df = dplyr::filter(df, .data$tabid %in% .env$tabid)
     if (NROW(df) > 0) df else NULL
   })
   filtered_ev_list = purrr::compact(filtered_ev_list)
@@ -105,63 +107,53 @@ rme_make_report = function(rme, map_version = NULL, tabids = NULL, test_names = 
      return(msg)
   }
 
-  combined_issues = dplyr::bind_rows(filtered_ev_list)
-
-  # Determine which map_versions and tabids to iterate through
-  versions_to_report = sort(unique(combined_issues$map_version))
+  combined_issues = dplyr::bind_rows(filtered_ev_list, .id = "test")
 
   # 2. Build Report Header
-  report_parts = c("# Regression Mapping Evaluation Report")
-  if (!is.null(rme$project_dir)) report_parts = c(report_parts, paste0("**Project**: `", rme$project_dir, "`"))
-  report_parts = c(report_parts, "\n---")
+  report_parts = list(
+    "# Regression Mapping Evaluation Report",
+    if (!is.null(rme$project_dir)) paste0("**Project**: `", rme$project_dir, "`"),
+    "\n---"
+  )
 
   # 3. Iterate and Build Report Body
-  for (mv in versions_to_report) {
-    report_parts = c(report_parts, paste0("\n## Map Version: `", mv, "`"))
+  issues_by_version = split(combined_issues, combined_issues$map_version)
 
-    version_issues = dplyr::filter(combined_issues, .data$map_version == .env$mv)
-    tables_in_version = sort(unique(version_issues$tabid))
+  for (mv in sort(names(issues_by_version))) {
+    version_issues = issues_by_version[[mv]]
+    version_parts = list(paste0("\n## Map Version: `", mv, "`"))
 
-    for (tid in tables_in_version) {
-      report_parts = c(report_parts, paste0("\n### Table `", tid, "`"))
-      any_issue_in_table = FALSE
+    issues_by_table = split(version_issues, version_issues$tabid)
 
-      for (test in tests_to_report) {
-        if (!test %in% names(filtered_ev_list)) next
+    for (tid in sort(names(issues_by_table))) {
+      table_issues = issues_by_table[[tid]]
+      table_parts = list(paste0("\n### Table `", tid, "`"))
 
-        test_df = filtered_ev_list[[test]]
+      tests_in_table = intersect(tests_to_report, unique(table_issues$test))
 
-        # Filter for current scope
-        current_issues = test_df %>%
-          dplyr::filter(.data$map_version == .env$mv, .data$tabid == .env$tid)
+      for (test in tests_in_table) {
+        current_issues = dplyr::filter(table_issues, .data$test == .env$test)
 
-        if (NROW(current_issues) > 0) {
-          any_issue_in_table = TRUE
+        table_parts = c(table_parts, paste0("\n#### Test: `", test, "`"))
 
-          # Test subsection header
-          report_parts = c(report_parts, paste0("\n#### Test: `", test, "`"))
-
-          # Add description
-          descr = if (long_descr) long_descriptions[[test]] else attr(test_df, "descr")
-          if (!is.null(descr)) report_parts = c(report_parts, paste0("> ", descr))
-
-          report_parts = c(report_parts, paste0("\n**Issues Found**: ", NROW(current_issues)))
-
-          # Format and add results
-          display_df = dplyr::select(current_issues, -any_of(c("map_version", "tabid")))
-          report_parts = c(report_parts, format_issues_md(display_df, test))
+        descr = if (long_descr) long_descriptions[[test]] else attr(filtered_ev_list[[test]], "descr")
+        if (!is.null(descr)) {
+            table_parts = c(table_parts, paste0("> ", descr))
         }
-      }
 
-      if (!any_issue_in_table) {
-        report_parts = c(report_parts, "_No issues found for this table in this map version._")
+        table_parts = c(table_parts,
+            paste0("\n**Issues Found**: ", NROW(current_issues)),
+            format_issues_md(dplyr::select(current_issues, -any_of(c("map_version", "tabid", "test"))), test)
+        )
       }
-       report_parts = c(report_parts, "\n---")
+      table_parts = c(table_parts, "\n---")
+      version_parts = c(version_parts, table_parts)
     }
+    report_parts = c(report_parts, version_parts)
   }
 
   # 4. Finalize and Output
-  final_report = paste(report_parts, collapse = "\n\n")
+  final_report = paste(purrr::compact(unlist(report_parts)), collapse = "\n\n")
   final_report = stringi::stri_replace_all_regex(final_report, "(\n){3,}", "\n\n") # Clean up excess newlines
 
   if (!is.null(outfile)) {
