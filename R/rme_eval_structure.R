@@ -5,7 +5,7 @@
 #' A function to group all structural checks
 #' @export
 rme_steps_structure = function() {
-  c("single_col_reg", "multicol_reg_plausibility", "overlapping_regs", "consistent_vertical_structure")
+  c("single_col_reg", "multicol_reg_plausibility", "overlapping_regs", "consistent_vertical_structure", "missing_se_mapping")
 }
 
 #' Check if regressions span multiple columns without justification.
@@ -179,4 +179,112 @@ rme_ev_consistent_vertical_structure = function(rme) {
     rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "flag")
 
   return(issues)
+}
+
+#' Check for unmapped standard errors.
+#'
+#' This check identifies mapped coefficients where their corresponding standard
+#' error cell (heuristically identified as the cell in parentheses below or
+#' to the right) has not been included in the same regression mapping.
+#' It also verifies if the numeric value in the unmapped SE cell would have
+#' matched the standard error, t-statistic, or p-value from the regression output.
+#'
+#' @param rme The rme object.
+#' @return A data frame of missing SE mappings, with a `would_match` column
+#'   indicating if the SE value is consistent with the regression output.
+rme_ev_missing_se_mapping = function(rme) {
+  restore.point("rme_ev_missing_se_mapping")
+
+  # 1. Identify all heuristically found coef-se pairs from cell_df
+  coef_se_pairs = rme$cell_df %>%
+    filter(reg_role == "coef", !is.na(partner_cellid)) %>%
+    select(coef_cellid = cellid, se_cellid = partner_cellid, tabid)
+
+  if (NROW(coef_se_pairs) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No coefficient-se pairs found in tables.", test_type = "flag"))
+  }
+
+  # 2. Identify all uniquely mapped cells (map_version, runid, cellid)
+  mapped_cells = rme$mc_df %>%
+    select(map_version, runid, cellid) %>%
+    distinct()
+
+  # 3. Join pairs with the mapped coefficients to find the runid for each coef
+  mapped_coefs = coef_se_pairs %>%
+    inner_join(mapped_cells, by = c("coef_cellid" = "cellid"), relationship = "many-to-many")
+
+  # 4. Create a lookup key for all mapped cells to efficiently check for existence
+  mapped_cells_lookup = mapped_cells %>%
+    mutate(key = paste(map_version, runid, cellid, sep = "--")) %>%
+    pull(key)
+
+  # 5. Filter for cases where the SE cell is NOT mapped to the same runid
+  missing_se_df = mapped_coefs %>%
+    mutate(se_key = paste(map_version, runid, se_cellid, sep = "--")) %>%
+    filter(!se_key %in% mapped_cells_lookup)
+
+  if (NROW(missing_se_df) == 0) {
+    return(rme_df_descr(tibble::tibble(), "No missing SE mappings found.", test_type = "flag"))
+  }
+
+  # 6. For the missing SEs, check if their value would have matched the regression output
+  if (is.null(rme$parcels$regcoef$regcoef)) {
+     warning("`regcoef` parcel not found. Cannot check if missing SEs would match.")
+     # Return issues without the match check
+     issues = missing_se_df %>%
+       select(map_version, tabid, runid, coef_cellid, se_cellid) %>%
+       mutate(would_match = NA)
+  } else {
+    # Get numeric values and decimal places for the unmapped SE cells
+    se_cell_data = rme$cell_df %>%
+        filter(cellid %in% missing_se_df$se_cellid) %>%
+        select(se_cellid = cellid, paren_val = num, paren_deci = num_deci)
+
+    # Get relevant regression output
+    regcoef_df = rme$parcels$regcoef$regcoef %>%
+        select(runid, cterm, reg_se = se, reg_t = t, reg_p = p)
+
+    # Join missing SEs with their values and potential regression matches
+    check_df = missing_se_df %>%
+        left_join(se_cell_data, by = "se_cellid") %>%
+        filter(!is.na(paren_val)) %>%
+        left_join(regcoef_df, by = "runid", relationship = "many-to-many")
+
+    # Perform the check
+    match_results = check_df %>%
+        filter(!is.na(reg_se) | !is.na(reg_t) | !is.na(reg_p)) %>%
+        mutate(
+            paren_deci = tidyr::replace_na(paren_deci, 0),
+            is_perfect_se_match = (round(reg_se, paren_deci) == paren_val),
+            is_perfect_t_match = (round(reg_t, paren_deci) == paren_val),
+            is_perfect_p_match = (round(reg_p, paren_deci) == paren_val)
+        ) %>%
+        rowwise() %>%
+        mutate(
+            is_match = any(c(is_perfect_se_match, is_perfect_t_match, is_perfect_p_match), na.rm = TRUE)
+        ) %>%
+        ungroup()
+
+    # Summarize results for each missing SE
+    issue_summary = match_results %>%
+        group_by(map_version, tabid, runid, coef_cellid, se_cellid) %>%
+        summarise(would_match = any(is_match, na.rm = TRUE), .groups = "drop")
+
+    # Join back with the full list of missing SEs in case some had no value to check
+    issues = missing_se_df %>%
+        select(map_version, tabid, runid, coef_cellid, se_cellid) %>%
+        left_join(issue_summary, by = c("map_version", "tabid", "runid", "coef_cellid", "se_cellid")) %>%
+        mutate(would_match = tidyr::replace_na(would_match, FALSE))
+  }
+
+  # 7. Add reg_ind for better reporting and finalize
+  final_issues = issues %>%
+    left_join(
+      rme$mc_df %>% select(map_version, runid, coef_cellid = cellid, reg_ind) %>% distinct(),
+      by = c("map_version", "runid", "coef_cellid")
+    ) %>%
+    select(map_version, tabid, reg_ind, runid, coef_cellid, se_cellid, would_match) %>%
+    rme_df_descr("Mapped coefficients with unmapped standard errors.", test_type = "flag")
+
+  return(final_issues)
 }
