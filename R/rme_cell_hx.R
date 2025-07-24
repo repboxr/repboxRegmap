@@ -24,7 +24,7 @@ rme_add_cell_reg_info = function(rme) {
   # This suggests a coef-se pair stacked vertically.
   df = cell_df %>%
     filter(has_num) %>%
-    select(tabid, cellid, row, col, is_paren) %>%
+    select(tabid, cellid, row, col, is_paren, text) %>%
     group_by(tabid, col) %>%
     arrange(row) %>%
     mutate(
@@ -62,7 +62,8 @@ rme_add_cell_reg_info = function(rme) {
   # Mark the corresponding coefficients
   coef_df = res_df %>%
     filter(!is.na(partner_cellid)) %>%
-    select(cellid = partner_cellid) %>%
+    select(.cellid = partner_cellid, partner_cellid=cellid) %>%
+    rename(cellid=.cellid) %>%
     distinct() %>%
     mutate(reg_role = "coef")
 

@@ -21,6 +21,8 @@ rme_steps_structure = function() {
 rme_ev_single_col_reg = function(rme) {
   restore.point("rme_ev_single_col_reg")
 
+  long_descr = "**Regression Spans Multiple Columns.** Regressions are typically presented in a single column. This test flags regressions whose mapped cells span multiple columns without a clear structural reason (like having standard errors in an adjacent column). This often indicates that cells from different regressions have been incorrectly grouped together."
+
   df = rme$mc_df %>%
     group_by(map_version, tabid, reg_ind) %>%
     summarise(
@@ -30,7 +32,7 @@ rme_ev_single_col_reg = function(rme) {
       .groups = "drop"
     ) %>%
     filter(num_cols > 1 & !has_right_se) %>%
-    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "flag")
+    rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "flag", long_descr = long_descr)
 
   return(df)
 }
@@ -49,6 +51,8 @@ rme_ev_single_col_reg = function(rme) {
 rme_ev_multicol_reg_plausibility = function(rme) {
   restore.point("rme_ev_multicol_reg_plausibility")
 
+  long_descr = "**Implausible Multi-Column Structure.** For a regression that legitimately spans multiple columns, we expect to find rows with numbers in more than one of those columns. This test flags multi-column regressions where every row *only* has a value in one column, suggesting a 'slip' where different rows of the same conceptual regression were incorrectly assigned to different columns."
+
   # Identify regressions mapped to more than one column and get their cellids
   multicol_regs = rme$mc_df %>%
     group_by(map_version, tabid, reg_ind) %>%
@@ -60,7 +64,7 @@ rme_ev_multicol_reg_plausibility = function(rme) {
       .groups="drop")
 
   if (NROW(multicol_regs) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No multi-column regressions to check.", test_type = "flag", long_descr = long_descr))
   }
 
   # Find regressions where no row has numbers in more than one column
@@ -73,13 +77,13 @@ rme_ev_multicol_reg_plausibility = function(rme) {
     filter(max_cols_per_row == 1)
 
   if (NROW(plausibility_check) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No implausible multi-column regressions found.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No implausible multi-column regressions found.", test_type = "flag", long_descr = long_descr))
   }
 
   # Join the issues with the cellids
   issues = multicol_regs %>%
     inner_join(plausibility_check, by = c("map_version", "tabid", "reg_ind")) %>%
-    rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "flag")
+    rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "flag", long_descr = long_descr)
 
   return(issues)
 }
@@ -96,6 +100,8 @@ rme_ev_multicol_reg_plausibility = function(rme) {
 rme_ev_overlapping_regs = function(rme) {
   restore.point("rme_ev_overlapping_regs")
 
+  long_descr = "**Overlapping Regression Mappings.** This test flags cells identified as coefficients that have been mapped to *more than one* regression within the *same* map version. This is almost always an error, as a single coefficient should belong to only one regression specification."
+
   df = rme$mc_df %>%
     filter(reg_role == "coef") %>%
     group_by(map_version, tabid, cellid) %>%
@@ -107,7 +113,7 @@ rme_ev_overlapping_regs = function(rme) {
       .groups = "drop"
     ) %>%
     filter(n_runids > 1 | n_reginds > 1) %>%
-    rme_df_descr("Coefficient cells mapped to multiple regressions.", test_type = "flag")
+    rme_df_descr("Coefficient cells mapped to multiple regressions.", test_type = "flag", long_descr = long_descr)
 
   return(df)
 }
@@ -154,6 +160,8 @@ rme_add_row_class = function(cell_df) {
 rme_ev_consistent_vertical_structure = function(rme) {
   restore.point("rme_ev_consistent_vertical_structure")
 
+  long_descr = "**Inconsistent Summary Stat Rows.** This test checks for consistent table structure. It identifies summary statistics (like 'Observations' or 'R-squared') by keywords and flags cases where the same statistic appears on different row numbers across the columns of a single table. This points to a potentially messy or inconsistent table layout or a mapping error."
+
   # Add row class if not already present
   if (!"row_class" %in% names(rme$cell_df)) {
     rme$cell_df = rme_add_row_class(rme$cell_df)
@@ -164,7 +172,7 @@ rme_ev_consistent_vertical_structure = function(rme) {
     filter(!is.na(row_class))
 
   if (NROW(mc_df_ext) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No classified rows (e.g., nobs, r2) found to check for consistency.", test_type = "flag", long_descr = long_descr))
   }
 
   issues = mc_df_ext %>%
@@ -176,7 +184,7 @@ rme_ev_consistent_vertical_structure = function(rme) {
       .groups = "drop"
     ) %>%
     filter(n_diff_rows > 1) %>%
-    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "flag")
+    rme_df_descr("Inconsistent row indices for the same statistic type (e.g., 'nobs').", test_type = "flag", long_descr = long_descr)
 
   return(issues)
 }
@@ -195,13 +203,15 @@ rme_ev_consistent_vertical_structure = function(rme) {
 rme_ev_missing_se_mapping = function(rme) {
   restore.point("rme_ev_missing_se_mapping")
 
+  long_descr = "**Unmapped Standard Error.** This test flags cases where a mapped coefficient cell has an associated standard error (a value in parentheses, typically below the coefficient) that was *not* included in the regression mapping. It also reports whether the numeric value of that unmapped SE would have been a correct match for the regression's output, helping to distinguish simple mapping omissions from more complex issues."
+
   # 1. Identify all heuristically found coef-se pairs from cell_df
   coef_se_pairs = rme$cell_df %>%
     filter(reg_role == "coef", !is.na(partner_cellid)) %>%
     select(coef_cellid = cellid, se_cellid = partner_cellid, tabid)
 
   if (NROW(coef_se_pairs) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No coefficient-se pairs found in tables.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No coefficient-se pairs found in tables.", test_type = "flag", long_descr = long_descr))
   }
 
   # 2. Identify all uniquely mapped cells (map_version, runid, cellid)
@@ -224,7 +234,7 @@ rme_ev_missing_se_mapping = function(rme) {
     filter(!se_key %in% mapped_cells_lookup)
 
   if (NROW(missing_se_df) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No missing SE mappings found.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No missing SE mappings found.", test_type = "flag", long_descr = long_descr))
   }
 
   # 6. For the missing SEs, check if their value would have matched the regression output
@@ -284,7 +294,7 @@ rme_ev_missing_se_mapping = function(rme) {
       by = c("map_version", "runid", "coef_cellid")
     ) %>%
     select(map_version, tabid, reg_ind, runid, coef_cellid, se_cellid, would_match) %>%
-    rme_df_descr("Mapped coefficients with unmapped standard errors.", test_type = "flag")
+    rme_df_descr("Mapped coefficients with unmapped standard errors.", test_type = "flag", long_descr = long_descr)
 
   return(final_issues)
 }

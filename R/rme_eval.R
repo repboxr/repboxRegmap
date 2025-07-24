@@ -64,7 +64,8 @@ rme_ev_runids_differ = function(rme) {
   # The reporting function will use this to generate per-version reports.
   discrepancy_df %>%
     rme_df_descr("cellids where map versions map to different runids",
-                 test_type = "discrepancy")
+                 test_type = "discrepancy",
+                 long_descr = "**Discrepancy Across Map Versions.** This test identifies cells that are mapped to *different* regression `runid`s by different AI mapping versions. This is a key indicator of disagreement between models and points to areas of uncertainty.")
 }
 
 rme_ev_invalid_cellids = function(rme) {
@@ -76,7 +77,8 @@ rme_ev_invalid_cellids = function(rme) {
     anti_join(cell_df, by="cellid") %>%
     select(map_version, tabid, reg_ind, cellid)  %>%
     rme_df_merge_cellids() %>%
-    rme_df_descr("map versions with invalid cellids (cellids not in cell_df)", test_type = "flag")
+    rme_df_descr("map versions with invalid cellids (cellids not in cell_df)", test_type = "flag",
+                 long_descr = "**Invalid `cellid` Mapping.** This test flags mappings that reference a `cellid` that does not exist in the parsed table data (`cell_df`). This is a critical integrity error, indicating a hallucinated or malformed cell reference from the AI.")
   return(inv_df)
 }
 
@@ -88,7 +90,8 @@ rme_ev_invalid_runids = function(rme) {
     filter(!runid %in% rme$run_df$runid) %>%
     select(map_version, tabid,reg_ind, cellid, runid=runid) %>%
     rme_df_merge_cellids() %>%
-    rme_df_descr("mapped to non-existent runid", test_type = "flag")
+    rme_df_descr("mapped to non-existent runid", test_type = "flag",
+                 long_descr = "**Invalid `runid` Mapping.** This test flags mappings that point to a `runid` that does not exist in the project's execution log (`run_df`). This is a critical integrity error, as the mapped regression output cannot be found.")
 }
 
 # Check for mappings to commands that are not regressions
@@ -99,6 +102,8 @@ rme_ev_non_reg_cmd = function(rme) {
     filter(!is.true(is_reg)) %>%
     select(map_version, tabid, reg_ind, cellid, runid, cmd, cmd_type, reg_runid) %>%
     rme_df_merge_cellids() %>%
-    rme_df_descr("Mapped to a cmd that is not a regcmd. This is not neccessarily a wrong mapping but useful information, e.g. for post-estimation commands.", test_type = "note_flag")
+    rme_df_descr("Mapped to a cmd that is not a regcmd. This is not neccessarily a wrong mapping but useful information, e.g. for post-estimation commands.",
+                 test_type = "note_flag",
+                 long_descr = "**Mapping to Non-Regression Command.** This test identifies cells mapped to a Stata command that is not a primary regression command (e.g., `test`, `margins`, `summarize`). This is not necessarily an error—post-estimation results are often included in tables—but serves as an important note. The report shows the command type and the `runid` of the last preceding regression.")
   df
 }

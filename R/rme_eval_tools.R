@@ -131,9 +131,12 @@ rme_combine_ev_df = function(rme, eval_steps = NULL) {
   return(combined_df)
 }
 
-rme_df_descr = function(df, descr, test_type = c("flag","discrepancy", "note_flag")[1]) {
+rme_df_descr = function(df, descr, test_type = c("flag","discrepancy", "note_flag")[1], long_descr = NULL) {
   attr(df, "descr") = descr
   attr(df, "test_type") = test_type
+  if (!is.null(long_descr)) {
+    attr(df, "long_descr") = long_descr
+  }
   df
 }
 

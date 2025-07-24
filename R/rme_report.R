@@ -64,20 +64,6 @@ rme_make_report = function(rme, map_version = NULL, tabid = NULL, test_names = N
     return(df_to_markdown(df))
   }
 
-  # Descriptions for tests when long_descr = TRUE
-  long_descriptions = list(
-    runids_differ = "**Discrepancy Across Map Versions.** This test identifies cells that are mapped to *different* regression `runid`s by different AI mapping versions. This is a key indicator of disagreement between models and points to areas of uncertainty.",
-    invalid_runids = "**Invalid `runid` Mapping.** This test flags mappings that point to a `runid` that does not exist in the project's execution log (`run_df`). This is a critical integrity error, as the mapped regression output cannot be found.",
-    invalid_cellids = "**Invalid `cellid` Mapping.** This test flags mappings that reference a `cellid` that does not exist in the parsed table data (`cell_df`). This is a critical integrity error, indicating a hallucinated or malformed cell reference from the AI.",
-    non_reg_cmd = "**Mapping to Non-Regression Command.** This test identifies cells mapped to a Stata command that is not a primary regression command (e.g., `test`, `margins`, `summarize`). This is not necessarily an error—post-estimation results are often included in tables—but serves as an important note. The report shows the command type and the `runid` of the last preceding regression.",
-    coef_se_match = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. A match is considered perfect if the code output, rounded to the number of decimal places shown in the table, equals the table value. Issues can be `no_coef_match` (table coef not in output within tolerance), `no_match_perhaps_wrong_sign` (a match is found if the sign is flipped), `no_paren_match` (SE/t-stat/p-val mismatch), or `rounding_error` (the values are very close but don't match exactly after rounding, suggesting a minor discrepancy).",
-    single_col_reg = "**Regression Spans Multiple Columns.** Regressions are typically presented in a single column. This test flags regressions whose mapped cells span multiple columns without a clear structural reason (like having standard errors in an adjacent column). This often indicates that cells from different regressions have been incorrectly grouped together.",
-    multicol_reg_plausibility = "**Implausible Multi-Column Structure.** For a regression that legitimately spans multiple columns, we expect to find rows with numbers in more than one of those columns. This test flags multi-column regressions where every row *only* has a value in one column, suggesting a 'slip' where different rows of the same conceptual regression were incorrectly assigned to different columns.",
-    overlapping_regs = "**Overlapping Regression Mappings.** This test flags cells identified as coefficients that have been mapped to *more than one* regression within the *same* map version. This is almost always an error, as a single coefficient should belong to only one regression specification.",
-    consistent_vertical_structure = "**Inconsistent Summary Stat Rows.** This test checks for consistent table structure. It identifies summary statistics (like 'Observations' or 'R-squared') by keywords and flags cases where the same statistic appears on different row numbers across the columns of a single table. This points to a potentially messy or inconsistent table layout or a mapping error.",
-    missing_se_mapping = "**Unmapped Standard Error.** This test flags cases where a mapped coefficient cell has an associated standard error (a value in parentheses, typically below the coefficient) that was *not* included in the regression mapping. It also reports whether the numeric value of that unmapped SE would have been a correct match for the regression's output, helping to distinguish simple mapping omissions from more complex issues."
-  )
-
   # --- Main Logic ---
 
   # 1. Determine tests and get all evaluation data
@@ -137,7 +123,12 @@ rme_make_report = function(rme, map_version = NULL, tabid = NULL, test_names = N
 
         table_parts = c(table_parts, paste0("\n#### Test: `", test, "`"))
 
-        descr = if (long_descr) long_descriptions[[test]] else attr(filtered_ev_list[[test]], "descr")
+        test_df = filtered_ev_list[[test]]
+        descr = if (long_descr) attr(test_df, "long_descr") else NULL
+        if (is.null(descr)) {
+          descr = attr(test_df, "descr")
+        }
+
         if (!is.null(descr)) {
             table_parts = c(table_parts, paste0("> ", descr))
         }

@@ -29,8 +29,10 @@ rme_steps_value = function() {
 #' @param rel_tol_rounding The relative tolerance for what is considered a rounding error. (This is now superseded by decimal-based rounding but kept for legacy reasons).
 #' @param rel_tol_mismatch The relative tolerance for what is considered a mismatch.
 #' @return A data frame of identified issues.
-rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch = 0.05) {
+rme_ev_coef_se_match = function(rme) {
   restore.point("rme_ev_coef_se_match")
+
+  long_descr = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. A match is considered perfect if the code output, rounded to the number of decimal places shown in the table, equals the table value. Issues can be `no_coef_match` (table coef not in output within tolerance), `no_match_perhaps_wrong_sign` (a match is found if the sign is flipped), `no_paren_match` (SE/t-stat/p-val mismatch), or `rounding_error` (the values are very close but don't match exactly after rounding, suggesting a minor discrepancy)."
 
   # 1. Get all coef-se pairs from the tables, including tabid and decimal places
   cell_info_df = rme$cell_df %>% select(cellid, num, num_deci)
@@ -57,7 +59,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
     filter(!is.na(coef_val), !is.na(paren_val))
 
   if (NROW(mapped_pairs) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No coef/se pairs found to check.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No coef/se pairs found to check.", test_type = "flag", long_descr = long_descr))
   }
 
   # 4. Get all relevant regcoef data
@@ -75,7 +77,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
     filter(!is.na(reg_coef))
 
   if (NROW(all_potential_matches) == 0) {
-    return(rme_df_descr(tibble::tibble(), "No regcoef entries for mapped runids.", test_type = "flag"))
+    return(rme_df_descr(tibble::tibble(), "No regcoef entries for mapped runids.", test_type = "flag", long_descr = long_descr))
   }
 
   # 6. Score each potential match
@@ -85,15 +87,15 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
       coef_deci = tidyr::replace_na(coef_deci, 0),
       paren_deci = tidyr::replace_na(paren_deci, 0),
 
-      # Check for perfect match based on rounding to table's decimal places
+      # Check for perfect matches based on rounding to table's decimal places
       is_perfect_coef_match = (round(reg_coef, coef_deci) == coef_val),
+      is_perfect_sign_flip_match = (round(reg_coef, coef_deci) == -coef_val),
       is_perfect_se_match = (round(reg_se, paren_deci) == paren_val),
       is_perfect_t_match = (round(reg_t, paren_deci) == paren_val),
       is_perfect_p_match = (round(reg_p, paren_deci) == paren_val),
 
-      # Relative distances are still needed for scoring imperfect matches
+      # Relative distances are still needed for reporting on misses
       rel_dist_coef = abs(reg_coef - coef_val) / pmax(abs(reg_coef), abs(coef_val), 1e-9),
-      rel_dist_coef_sign_flip = abs(reg_coef - (-1 * coef_val)) / pmax(abs(reg_coef), abs(coef_val), 1e-9),
       rel_dist_se = abs(reg_se - paren_val) / pmax(abs(reg_se), abs(paren_val), 1e-9),
       rel_dist_t = abs(reg_t - paren_val) / pmax(abs(reg_t), abs(paren_val), 1e-9),
       rel_dist_p = abs(reg_p - paren_val) / pmax(abs(reg_p), abs(paren_val), 1e-9)
@@ -106,17 +108,29 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
     ungroup() %>%
     mutate(
       min_rel_dist_paren = ifelse(is.infinite(min_rel_dist_paren), NA, min_rel_dist_paren),
-      # Score: 2 for perfect match (after rounding), 1 for close match (rounding error), 0 for mismatch
+      # Score: 2 for perfect match, 1 for close match (rounding error), 0 for mismatch.
+      # A "rounding error" is a non-perfect match where the absolute difference
+      # is within two units of the last decimal place.
+      is_rounding_coef = !is_perfect_coef_match & (abs(reg_coef - coef_val) < (2 * 10^(-coef_deci))),
+
       coef_match_quality = case_when(
-        is.na(rel_dist_coef) ~ 0,
         is_perfect_coef_match ~ 2,
-        rel_dist_coef <= rel_tol_mismatch ~ 1,
+        is_rounding_coef ~ 1,
         TRUE ~ 0
       ),
+
+      # For parenthesis value, check if any candidate (se, t, p) qualifies as a rounding error.
+      is_rounding_paren = !is_perfect_paren_match & any(
+          (abs(reg_se - paren_val) < (2 * 10^(-paren_deci))),
+          (abs(reg_t - paren_val) < (2 * 10^(-paren_deci))),
+          (abs(reg_p - paren_val) < (2 * 10^(-paren_deci))),
+          na.rm = TRUE
+      ),
+
       paren_match_quality = case_when(
         is.na(min_rel_dist_paren) ~ 0,
         is_perfect_paren_match ~ 2,
-        min_rel_dist_paren <= rel_tol_mismatch ~ 1,
+        is_rounding_paren ~ 1,
         TRUE ~ 0
       ),
       match_score = coef_match_quality + paren_match_quality
@@ -141,7 +155,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
     ) %>%
     ungroup() %>%
     mutate(
-      is_sign_flip_match = (coef_match_quality == 0) & (rel_dist_coef_sign_flip <= rel_tol_mismatch),
+      is_sign_flip_match = (coef_match_quality == 0) & is_perfect_sign_flip_match,
       issue = case_when(
         is_sign_flip_match ~ "no_match_perhaps_wrong_sign",
         coef_match_quality == 0 ~ "no_coef_match",
@@ -155,7 +169,7 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
       table_val = if_else(issue_cellid == coef_cellid, coef_val, paren_val),
       true_val_cand = if_else(issue_cellid == coef_cellid, reg_coef, best_paren_val),
       details = case_when(
-        is_sign_flip_match ~ paste0("Potential sign error. Flipped rel diff ", round(rel_dist_coef_sign_flip,3), ". Paren match quality: ", paren_match_quality),
+        is_sign_flip_match ~ paste0("Perfect match if sign is flipped. Paren match quality: ", paren_match_quality),
         issue_cellid == coef_cellid ~ paste0("Coef rel diff ", round(rel_dist_coef,3), ". Paren match quality: ", paren_match_quality),
         TRUE ~ paste0("Paren rel diff ", round(min_rel_dist_paren,3)," to ", best_paren_type, " ", round(best_paren_val, 4))
       )
@@ -179,14 +193,13 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
 
     no_match_issues = closest_misses %>%
       mutate(
-        is_sign_flip_match = rel_dist_coef_sign_flip <= rel_tol_mismatch,
+        is_sign_flip_match = is_perfect_sign_flip_match,
         issue = if_else(is_sign_flip_match, "no_match_perhaps_wrong_sign", "no_coef_match"),
         partner_cellid = se_cellid,
         table_val = coef_val,
         true_val_cand = reg_coef,
         details = if_else(is_sign_flip_match,
-                         paste0("Potential sign error. Flipped rel diff ", round(rel_dist_coef_sign_flip,3),
-                                ". Paren rel diff ", round(min_rel_dist_paren,3)),
+                         paste0("Perfect match if sign is flipped. Paren rel diff ", round(min_rel_dist_paren,3)),
                          paste0("No match found. Closest coef rel diff ", round(rel_dist_coef,3),
                                 ", closest paren rel diff ", round(min_rel_dist_paren,3)))
       ) %>%
@@ -195,5 +208,5 @@ rme_ev_coef_se_match = function(rme, rel_tol_rounding = 0.005, rel_tol_mismatch 
 
   issues = dplyr::bind_rows(issues_from_best, no_match_issues) %>%
     left_join(rme$mc_df %>% select(map_version, reg_ind, cellid, runid) %>% unique(), by= c("map_version","cellid","runid"))
-  return(rme_df_descr(issues, "Issues from comparing table coef/se values with regcoef output.", test_type = "flag"))
+  return(rme_df_descr(issues, "Issues from comparing table coef/se values with regcoef output.", test_type = "flag", long_descr = long_descr))
 }
