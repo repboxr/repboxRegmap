@@ -31,7 +31,7 @@ rme_init = function(project_dir, doc_type = "art") {
   restore.point("rme_init")
 
   # Load repdb parcels
-  parcel_names = c("reg_core", "regcoef", "regscalar", "regstring", "regvar", "regxvar")
+  parcel_names = c("reg_core", "regcoef", "regscalar", "regstring", "regvar", "regxvar", "stata_run_log")
   parcels = repdb_load_parcels(project_dir, parcel_names = parcel_names)
   parcels = parcels_add_runid_step(parcels,map_df = parcels$reg_core$reg)
 

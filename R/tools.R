@@ -63,3 +63,26 @@ unnest_comma_string_col = function(df, comma_string_col,sep=",") {
 
   res_df
 }
+
+# Helper to convert a data frame to a markdown table
+df_to_markdown = function(df) {
+  if (!is.data.frame(df) || NROW(df) == 0) return("")
+
+  # Clean strings for markdown and handle list columns
+  clean_val = function(v) {
+    if (is.list(v)) return("[[...]]")
+    s = as.character(v)
+    s[is.na(s)] = ""
+    s = stringi::stri_replace_all_fixed(s, "|", "|")
+    s = stringi::stri_replace_all_regex(s, "[\r\n]+", " ")
+    s
+  }
+
+  df_char = as.data.frame(lapply(df, function(col) sapply(col, clean_val)), stringsAsFactors = FALSE)
+  names(df_char) = names(df)
+
+  header = paste0("| ", paste(names(df_char), collapse = " | "), " |")
+  separator = paste0("|", paste(rep("---", ncol(df_char)), collapse = "|"), "|")
+  body_rows = apply(df_char, 1, function(row) paste0("| ", paste(row, collapse = " | "), " |"))
+  paste(c(header, separator, body_rows), collapse = "\n")
+}

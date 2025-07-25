@@ -22,7 +22,8 @@ rme_steps_all = function() {
   c(
     rme_steps_integrity(),
     rme_steps_value(),
-    rme_steps_structure()
+    rme_steps_structure(),
+    rme_steps_other()
   )
 }
 

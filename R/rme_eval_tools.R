@@ -120,7 +120,9 @@ rme_combine_ev_df = function(rme, eval_steps = NULL) {
     return(tibble::tibble())
   }
 
-  eval_list = rme$evals[eval_steps]
+  eval_list = lapply(eval_steps, function(eval_step) {
+    rme$evals[[eval_step]] %>% add_col_left(test_name=eval_step)
+  })
 
   # The evaluation functions are expected to return a tibble/data.frame.
   # We combine them into one big tibble.
