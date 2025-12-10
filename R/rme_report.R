@@ -49,14 +49,14 @@ rme_make_report = function(rme, map_version = NULL, tabid = NULL, test_names = N
 
     if (use_list_format) {
       # Custom list format for specific tests
-      if (test_name == "multicol_reg_plausibility" && all(c("reg_ind", "cellids", "cols") %in% names(df))) {
-        items = purrr::pmap_chr(df, function(reg_ind, cellids, cols, ...) {
-          paste0("* **Reg. ", reg_ind, "**: Implausible structure for columns `", cols, "`. (Cells: `", cellids, "`)")
+      if (test_name == "multicol_reg_plausibility" && all(c("regid", "cellids", "cols") %in% names(df))) {
+        items = purrr::pmap_chr(df, function(regid, cellids, cols, ...) {
+          paste0("* **Reg. ", regid, "**: Implausible structure for columns `", cols, "`. (Cells: `", cellids, "`)")
         })
         return(paste(items, collapse = "\n"))
       }
-      if (test_name %in% c("invalid_cellids", "single_col_reg") && all(c("reg_ind", "cellids") %in% names(df))) {
-        items = purrr::map2_chr(df$reg_ind, df$cellids, ~paste0("* **Reg. ", .x, "**: Affects cells `", .y, "`"))
+      if (test_name %in% c("invalid_cellids", "single_col_reg") && all(c("regid", "cellids") %in% names(df))) {
+        items = purrr::map2_chr(df$regid, df$cellids, ~paste0("* **Reg. ", .x, "**: Affects cells `", .y, "`"))
         return(paste(items, collapse = "\n"))
       }
     }

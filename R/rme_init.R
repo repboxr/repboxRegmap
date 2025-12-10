@@ -15,6 +15,14 @@ example = function() {
   outfile = file.path(project_dir,"fp","eval_art/rme_report.md")
   str = rme_make_report(rme,outfile = outfile,long_descr = TRUE, map_version = "g25f-mocr--v0", tabid="2")
   rstudioapi::filesPaneNavigate(outfile)
+
+  library(repboxReport)
+  project_dir = "/home/rstudio/repbox/projects_gha_new/aejapp_10_4_6"
+  opts = rr_map_report_opts(embed_data = FALSE)
+  rep_file = rr_map_report(project_dir,opts = opts)
+  browseURL(rep_file)
+  rstudioapi::filesPaneNavigate(rep_file)
+
   # Explore the created rme object
   ls(rme)
   head(rme$mc_df)
@@ -75,7 +83,7 @@ rme_init = function(project_dir, doc_type = "art") {
 
   wrong_numbers_df = map_reg_run %>%
     filter(!sapply(wrong_number_cases, is.null)) %>%
-    select(ver_id, prod_id, tabid, reg_ind, runid, cmd, cmd_type,  wrong_number_cases) %>%
+    select(ver_id, prod_id, tabid, regid, runid, cmd, cmd_type,  wrong_number_cases) %>%
     tidyr::unnest(wrong_number_cases)
 
 
@@ -90,7 +98,7 @@ rme_init = function(project_dir, doc_type = "art") {
     filter(!is.na(cellid), cellid != "") %>%
     # Select and reorder a common set of columns for the final unified data frame.
     select(
-      cellid, map_version, prod_id, ver_id, tabid, any_of("reg_ind"), runid,
+      cellid, map_version, prod_id, ver_id, tabid, any_of("regid"), runid,
       # Keep problem description if present
       any_of("problem")
     ) %>%
@@ -115,8 +123,10 @@ rme_init = function(project_dir, doc_type = "art") {
     mc_df = mc_df,
     wrong_numbers_df = wrong_numbers_df,
     map_cell_agg = map_cell_agg,
-    map_reg_run = map_reg_run
+    map_reg_run = map_reg_run,
+    map_versions = unique(mc_df$map_version)
   ))
+
 
   return(rme)
 }
@@ -186,3 +196,4 @@ rme_add_run_df_cmd_df = function(rme, project_dir=rme$project_dir, parcels=rme$p
 
   rme
 }
+

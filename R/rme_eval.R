@@ -5,26 +5,41 @@ example = function() {
   project_dir = "/home/rstudio/repbox/projects_gha_new/aejapp_10_4_6"
   #rme = rme_load(project_dir)
   rme = rme_init(project_dir)
-  rme = rme_add_eval(rme, rme_steps_integrity())
+  names(rme)
+  rme$map_versions
+
+  rme = rme_add_eval(rme, rme_steps_all())
 
   rme_print_ev_report(rme)
   df = rme_combine_ev_df(rme)
 }
 
-rme_steps_integrity = function() {
-  c("runids_differ", "invalid_runids", "invalid_cellids", "non_reg_cmd")
+
+
+rme_all_ev_funs = function() {
+  funs = getNamespaceExports("repboxRegmap")
+  funs[startsWith(funs,"rme_ev_")]
 }
 
 
 #' Get all evaluation step names
 #' @export
 rme_steps_all = function() {
-  c(
+  all_steps = c(
     rme_steps_integrity(),
     rme_steps_value(),
     rme_steps_structure(),
     rme_steps_other()
   )
+  return(all_steps)
+
+  funs = rme_all_ev_funs()
+  all_steps2 = stringi::stri_sub(funs, 8)
+  list(
+    missing = setdiff(all_steps2, all_steps),
+    extra = setdiff(all_steps, all_steps2)
+  )
+  all_steps
 }
 
 #' Run all evaluation steps
@@ -38,6 +53,11 @@ rme_eval_all = function(rme, ...) {
   restore.point("rme_eval_all")
   rme = rme_add_eval(rme, rme_steps_all(), ...)
   rme
+}
+
+
+rme_steps_integrity = function() {
+  c("runids_differ", "invalid_runids", "invalid_cellids", "non_reg_cmd")
 }
 
 
@@ -76,7 +96,7 @@ rme_ev_invalid_cellids = function(rme) {
 
   inv_df = mc_df %>%
     anti_join(cell_df, by="cellid") %>%
-    select(map_version, tabid, reg_ind, cellid)  %>%
+    select(map_version, tabid, regid, cellid)  %>%
     rme_df_merge_cellids() %>%
     rme_df_descr("map versions with invalid cellids (cellids not in cell_df)", test_type = "flag",
                  long_descr = "**Invalid `cellid` Mapping.** This test flags mappings that reference a `cellid` that does not exist in the parsed table data (`cell_df`). This is a critical integrity error, indicating a hallucinated or malformed cell reference from the AI.")
@@ -89,7 +109,7 @@ rme_ev_invalid_runids = function(rme) {
   df = rme$mc_df %>%
     filter(!is.na(runid)) %>%
     filter(!runid %in% rme$run_df$runid) %>%
-    select(map_version, tabid,reg_ind, cellid, runid=runid) %>%
+    select(map_version, tabid,regid, cellid, runid=runid) %>%
     rme_df_merge_cellids() %>%
     rme_df_descr("mapped to non-existent runid", test_type = "flag",
                  long_descr = "**Invalid `runid` Mapping.** This test flags mappings that point to a `runid` that does not exist in the project's execution log (`run_df`). This is a critical integrity error, as the mapped regression output cannot be found.")
@@ -101,7 +121,7 @@ rme_ev_non_reg_cmd = function(rme) {
   df = rme$mc_df %>%
     # is_reg is pre-computed and joined into mc_df
     filter(!is.true(is_reg)) %>%
-    select(map_version, tabid, reg_ind, cellid, runid, cmd, cmd_type, reg_runid) %>%
+    select(map_version, tabid, regid, cellid, runid, cmd, cmd_type, reg_runid) %>%
     rme_df_merge_cellids() %>%
     rme_df_descr("Mapped to a cmd that is not a regcmd. This is not neccessarily a wrong mapping but useful information, e.g. for post-estimation commands.",
                  test_type = "note_flag",

@@ -32,7 +32,7 @@ rme_steps_value = function() {
 rme_ev_coef_se_match = function(rme) {
   restore.point("rme_ev_coef_se_match")
 
-  long_descr = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. A match is considered perfect if the code output, rounded to the number of decimal places shown in the table, equals the table value. Issues can be `no_coef_match` (table coef not in output within tolerance), `no_match_perhaps_wrong_sign` (a match is found if the sign is flipped), `no_paren_match` (SE/t-stat/p-val mismatch), or `rounding_error` (the values are very close but don't match exactly after rounding, suggesting a minor discrepancy)."
+  long_descr = "**Value Mismatch between Table and Code.** This is a core value-based check. It compares numeric values from the table (identified as coefficient/standard error pairs) against the results from the mapped regression's `regcoef` output. A match is considered perfect if the code output, rounded to the number of decimal places shown in the table, equals the table value."
 
   # 1. Get all coef-se pairs from the tables, including tabid and decimal places
   cell_info_df = rme$cell_df %>% select(cellid, num, num_deci)
@@ -110,8 +110,8 @@ rme_ev_coef_se_match = function(rme) {
       min_rel_dist_paren = ifelse(is.infinite(min_rel_dist_paren), NA, min_rel_dist_paren),
       # Score: 2 for perfect match, 1 for close match (rounding error), 0 for mismatch.
       # A "rounding error" is a non-perfect match where the absolute difference
-      # is within two units of the last decimal place.
-      is_rounding_coef = !is_perfect_coef_match & (abs(reg_coef - coef_val) < (2 * 10^(-coef_deci))),
+      # is within 1.01 units of the last decimal place.
+      is_rounding_coef = !is_perfect_coef_match & (abs(reg_coef - coef_val) < (1.01 * 10^(-coef_deci))),
 
       coef_match_quality = case_when(
         is_perfect_coef_match ~ 2,
@@ -121,9 +121,9 @@ rme_ev_coef_se_match = function(rme) {
 
       # For parenthesis value, check if any candidate (se, t, p) qualifies as a rounding error.
       is_rounding_paren = !is_perfect_paren_match & any(
-          (abs(reg_se - paren_val) < (2 * 10^(-paren_deci))),
-          (abs(reg_t - paren_val) < (2 * 10^(-paren_deci))),
-          (abs(reg_p - paren_val) < (2 * 10^(-paren_deci))),
+          (abs(reg_se - paren_val) < (1.01 * 10^(-paren_deci))),
+          (abs(reg_t - paren_val) < (1.01 * 10^(-paren_deci))),
+          (abs(reg_p - paren_val) < (1.01 * 10^(-paren_deci))),
           na.rm = TRUE
       ),
 
@@ -145,6 +145,54 @@ rme_ev_coef_se_match = function(rme) {
     slice(1) %>%
     ungroup()
 
+  # Added 7b find best paren type over each table
+  best_paren = best_matches %>%
+    group_by(tabid) %>%
+    summarize(
+      score_se = sum(is_perfect_se_match),
+      score_t = sum(is_perfect_t_match),
+      score_p = sum(is_perfect_p_match)
+    ) %>%
+    mutate(
+      paren_type = case_when(
+        score_se >= pmax(score_t, score_p) ~ "se",
+        score_t >= score_p ~ "t",
+        TRUE ~ "p"
+      )
+    )
+  best_matches = left_join(best_matches, select(best_paren, tabid, paren_type), by="tabid")
+  # recompute match score and type for best_matches using actual paren_type
+
+  best_matches = best_matches %>%
+    mutate(
+      is_perfect_paren_match = case_when(
+        paren_type == "se" ~ is_perfect_se_match,
+        paren_type == "t" ~ is_perfect_t_match,
+        paren_type == "p" ~ is_perfect_p_match,
+        TRUE ~ FALSE
+      ),
+      is_rounding_paren = !is_perfect_paren_match &  case_when(
+        paren_type == "se" ~ abs(reg_se - paren_val) < (1.01 * 10^(-paren_deci)),
+        paren_type == "t" ~  abs(reg_t - paren_val) < (1.01 * 10^(-paren_deci)),
+        paren_type == "p" ~ abs(reg_p - paren_val) < (1.01 * 10^(-paren_deci)),
+        TRUE ~ FALSE
+      ),
+      paren_match_quality = case_when(
+        is.na(min_rel_dist_paren) ~ 0,
+        is_perfect_paren_match ~ 2,
+        is_rounding_paren ~ 1,
+        TRUE ~ 0
+      ),
+      match_score = coef_match_quality + paren_match_quality
+    )
+
+  # temp = best_matches %>%
+  #   filter(!is_perfect_paren_match) %>%
+  #   select(tabid, se_cellid, coef_cellid, paren_val, paren_deci, reg_se, is_rounding_paren, is_perfect_paren_match, everything())
+  #
+  #
+  # abs(temp$reg_se[1] - temp$paren_val[1])[1] < (1.01 * 10^(-temp$paren_deci))[1]
+
   # 8. Generate issues based on the quality of the best match
   issues_from_best = best_matches %>%
     filter(match_score < 4 & match_score > 0) %>% # Imperfect but not total failure
@@ -157,11 +205,13 @@ rme_ev_coef_se_match = function(rme) {
     mutate(
       is_sign_flip_match = (coef_match_quality == 0) & is_perfect_sign_flip_match,
       issue = case_when(
-        is_sign_flip_match ~ "no_match_perhaps_wrong_sign",
+        coef_match_quality == 0 & paren_match_quality == 0 ~ "no_coef_paren_match",
+        is_sign_flip_match ~ "no_coef_match_perhaps_wrong_sign",
         coef_match_quality == 0 ~ "no_coef_match",
-        coef_match_quality == 1 ~ "rounding_error",
         paren_match_quality == 0 ~ "no_paren_match",
-        paren_match_quality == 1 ~ "rounding_error",
+        coef_match_quality == 1 & paren_match_quality == 1 ~ "coef_paren_rounding_error",
+        coef_match_quality == 1 ~ "coef_rounding_error",
+        paren_match_quality == 1 ~ "paren_rounding_error",
         TRUE ~ NA_character_
       ),
       issue_cellid = if_else(coef_match_quality < 2, coef_cellid, se_cellid),
@@ -207,6 +257,6 @@ rme_ev_coef_se_match = function(rme) {
   }
 
   issues = dplyr::bind_rows(issues_from_best, no_match_issues) %>%
-    left_join(rme$mc_df %>% select(map_version, reg_ind, cellid, runid) %>% unique(), by= c("map_version","cellid","runid"))
+    left_join(rme$mc_df %>% select(map_version, regid, cellid, runid) %>% unique(), by= c("map_version","cellid","runid"))
   return(rme_df_descr(issues, "Issues from comparing table coef/se values with regcoef output.", test_type = "flag", long_descr = long_descr))
 }

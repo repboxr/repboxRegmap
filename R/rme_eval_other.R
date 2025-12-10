@@ -6,55 +6,55 @@
 #' A function to group all "other" checks
 #' @export
 rme_steps_other = function() {
-  c("consistent_reg_ind_in_col", "post_est_reg_match", "value_match_other_cmd", "mapped_to_line_not_run")
+  c("consistent_regid_in_col", "post_est_reg_match", "value_match_other_cmd", "mapped_to_line_not_run")
 }
 
-#' Check for consistent reg_ind in single-regression columns.
+#' Check for consistent regid in single-regression columns.
 #'
 #' In a column that maps to a single main regression, all mapped cells
-#' (including post-estimation stats) should share the same `reg_ind`. This check
-#' flags columns where cells are assigned to multiple different `reg_ind`s,
+#' (including post-estimation stats) should share the same `regid`. This check
+#' flags columns where cells are assigned to multiple different `regid`s,
 #' suggesting a mapping inconsistency.
 #'
 #' @param rme The rme object.
 #' @return A data frame of identified issues.
-rme_ev_consistent_reg_ind_in_col = function(rme) {
-  restore.point("rme_ev_consistent_reg_ind_in_col")
+rme_ev_consistent_regid_in_col = function(rme) {
+  restore.point("rme_ev_consistent_regid_in_col")
 
-  long_descr = "**Inconsistent `reg_ind` in Column.** In a column that maps to a single main regression, all mapped cells (including post-estimation stats) should share the same `reg_ind`. This check flags columns where cells are assigned to multiple different `reg_ind`s, suggesting a mapping inconsistency."
+  long_descr = "**Inconsistent `regid` in Column.** In a column that maps to a single main regression, all mapped cells (including post-estimation stats) should share the same `regid`. This check flags columns where cells are assigned to multiple different `regid`s, suggesting a mapping inconsistency."
 
   mc_df = rme$mc_df
 
-  # 1. Identify single-regression columns and their "correct" reg_ind
+  # 1. Identify single-regression columns and their "correct" regid
   single_reg_cols = mc_df %>%
     filter(is_reg == TRUE) %>%
     group_by(map_version, tabid, col) %>%
     summarise(
-      main_reg_inds = list(sort(unique(reg_ind))),
+      main_regids = list(sort(unique(regid))),
       .groups = "drop"
     ) %>%
-    filter(lengths(main_reg_inds) == 1) %>%
-    mutate(correct_reg_ind = unlist(main_reg_inds)) %>%
-    select(map_version, tabid, col, correct_reg_ind)
+    filter(lengths(main_regids) == 1) %>%
+    mutate(correct_regid = unlist(main_regids)) %>%
+    select(map_version, tabid, col, correct_regid)
 
   if (NROW(single_reg_cols) == 0) {
     return(rme_df_descr(tibble::tibble(), "No single-regression columns found to check.", test_type = "flag", long_descr = long_descr))
   }
 
-  # 2. Find all cells in these columns that have an inconsistent reg_ind
+  # 2. Find all cells in these columns that have an inconsistent regid
   issues = mc_df %>%
     inner_join(single_reg_cols, by = c("map_version", "tabid", "col")) %>%
-    filter(reg_ind != correct_reg_ind) %>%
-    group_by(map_version, tabid, col, correct_reg_ind, reg_ind) %>%
+    filter(regid != correct_regid) %>%
+    group_by(map_version, tabid, col, correct_regid, regid) %>%
     summarise(
         cellids = paste(sort(unique(cellid)), collapse=","),
         .groups = "drop"
     ) %>%
     mutate(
-        details = paste0("Has reg_ind ", reg_ind, " but should be ", correct_reg_ind)
+        details = paste0("Has regid ", regid, " but should be ", correct_regid)
     ) %>%
-    select(map_version, tabid, col, reg_ind, cellids, details) %>%
-    rme_df_descr("Inconsistent `reg_ind` in single-regression columns.", test_type = "flag", long_descr = long_descr)
+    select(map_version, tabid, col, regid, cellids, details) %>%
+    rme_df_descr("Inconsistent `regid` in single-regression columns.", test_type = "flag", long_descr = long_descr)
 
   return(issues)
 }
@@ -196,11 +196,11 @@ rme_ev_mapped_to_line_not_run = function(rme) {
 
   issues = rme$map_reg_run %>%
     filter(is.na(runid) & !is.na(code_line)) %>%
-    select(map_version = ver_id, tabid, reg_ind, code_line, script_num, cell_ids) %>%
+    select(map_version = ver_id, tabid, regid, code_line, script_num, cell_ids) %>%
     filter(!is.na(cell_ids) & cell_ids != "") %>%
     unnest_comma_string_col("cell_ids") %>%
     rename(cellid = cell_ids) %>%
-    group_by(map_version, tabid, reg_ind, code_line, script_num) %>%
+    group_by(map_version, tabid, regid, code_line, script_num) %>%
     summarise(cellids = paste(sort(unique(cellid)), collapse=","), .groups="drop") %>%
     rename(mapped_code_line = code_line, mapped_script_num=script_num) %>%
     rme_df_descr("Cells mapped to a code line but not a `runid`.", test_type = "flag", long_descr = long_descr)

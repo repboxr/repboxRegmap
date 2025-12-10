@@ -24,14 +24,19 @@ rme_ev_single_col_reg = function(rme) {
   long_descr = "**Regression Spans Multiple Columns.** Regressions are typically presented in a single column. This test flags regressions whose mapped cells span multiple columns without a clear structural reason (like having standard errors in an adjacent column). This often indicates that cells from different regressions have been incorrectly grouped together."
 
   df = rme$mc_df %>%
-    group_by(map_version, tabid, reg_ind) %>%
+    group_by(map_version, tabid, regid) %>%
     summarise(
       cellids = paste(sort(unique(cellid)), collapse=","),
       num_cols = n_distinct(col),
       has_right_se = any(se_position == "right", na.rm = TRUE),
       .groups = "drop"
     ) %>%
-    filter(num_cols > 1 & !has_right_se) %>%
+    # allow multi-column regressions
+    # if all regressions in table are multi-column
+    # e.g. the case in balancing tables
+    group_by(map_version, tabid) %>%
+    mutate(min_tab_num_cols = max(1, min(num_cols))) %>%
+    filter(num_cols > min_tab_num_cols & !has_right_se) %>%
     rme_df_descr("Regressions spanning multiple columns without horizontal coef-se pairs.", test_type = "flag", long_descr = long_descr)
 
   return(df)
@@ -55,7 +60,7 @@ rme_ev_multicol_reg_plausibility = function(rme) {
 
   # Identify regressions mapped to more than one column and get their cellids
   multicol_regs = rme$mc_df %>%
-    group_by(map_version, tabid, reg_ind) %>%
+    group_by(map_version, tabid, regid) %>%
     filter(has_num, n_distinct(col) > 1) %>%
     summarise(
       cellids = paste(sort(unique(cellid)), collapse=","),
@@ -69,9 +74,9 @@ rme_ev_multicol_reg_plausibility = function(rme) {
 
   # Find regressions where no row has numbers in more than one column
   plausibility_check = rme$mc_df %>%
-    semi_join(multicol_regs, by = c("map_version", "tabid", "reg_ind")) %>%
+    semi_join(multicol_regs, by = c("map_version", "tabid", "regid")) %>%
     filter(has_num) %>%
-    group_by(map_version, reg_ind, tabid, row) %>%
+    group_by(map_version, regid, tabid, row) %>%
     summarise(cols_in_row = n_distinct(col), .groups = "drop_last") %>%
     summarise(max_cols_per_row = max(cols_in_row), .groups = "drop") %>%
     filter(max_cols_per_row == 1)
@@ -82,7 +87,7 @@ rme_ev_multicol_reg_plausibility = function(rme) {
 
   # Join the issues with the cellids
   issues = multicol_regs %>%
-    inner_join(plausibility_check, by = c("map_version", "tabid", "reg_ind")) %>%
+    inner_join(plausibility_check, by = c("map_version", "tabid", "regid")) %>%
     rme_df_descr("Multi-column regressions where no row has values in more than one column.", test_type = "flag", long_descr = long_descr)
 
   return(issues)
@@ -92,7 +97,7 @@ rme_ev_multicol_reg_plausibility = function(rme) {
 #' Check for overlapping coefficient cells.
 #'
 #' This check identifies cells that are heuristically classified as coefficients
-#' and are mapped to more than one regression `reg_ind` or multiple `runid`
+#' and are mapped to more than one regression `regid` or multiple `runid`
 #' within the same table. This indicates an overlap, which is usually an error.
 #'
 #' @param rme The rme object.
@@ -106,8 +111,8 @@ rme_ev_overlapping_regs = function(rme) {
     filter(reg_role == "coef") %>%
     group_by(map_version, tabid, cellid) %>%
     summarise(
-      n_reginds = n_distinct(reg_ind),
-      reg_inds = paste0(sort(unique(reg_ind)), collapse=","),
+      n_reginds = n_distinct(regid),
+      regids = paste0(sort(unique(regid)), collapse=","),
       n_runids = n_distinct(runid),
       runids = paste0(sort(unique(runid)), collapse=","),
       .groups = "drop"
@@ -287,13 +292,13 @@ rme_ev_missing_se_mapping = function(rme) {
         mutate(would_match = tidyr::replace_na(would_match, FALSE))
   }
 
-  # 7. Add reg_ind for better reporting and finalize
+  # 7. Add regid for better reporting and finalize
   final_issues = issues %>%
     left_join(
-      rme$mc_df %>% select(map_version, runid, coef_cellid = cellid, reg_ind) %>% distinct(),
+      rme$mc_df %>% select(map_version, runid, coef_cellid = cellid, regid) %>% distinct(),
       by = c("map_version", "runid", "coef_cellid")
     ) %>%
-    select(map_version, tabid, reg_ind, runid, coef_cellid, se_cellid, would_match) %>%
+    select(map_version, tabid, regid, runid, coef_cellid, se_cellid, would_match) %>%
     rme_df_descr("Mapped coefficients with unmapped standard errors.", test_type = "flag", long_descr = long_descr)
 
   return(final_issues)
