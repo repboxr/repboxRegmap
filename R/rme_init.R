@@ -7,7 +7,7 @@ example = function() {
   library(repboxRegmap)
   project_dir = "/home/rstudio/repbox/projects_gha_new/aejapp_10_4_6"
   rstudioapi::filesPaneNavigate(project_dir)
-  options(warn=2)
+  options(warn=1)
 
   rme = rme_init(project_dir)
   rme = rme_eval_all(rme)

@@ -106,9 +106,10 @@ rme_ev_post_est_reg_match = function(rme) {
 
 #' Helper to extract all numbers from a string
 extract_numbers = function(text) {
+  restore.point("extract_numbers")
   text_no_comma = stringi::stri_replace_all_fixed(text, ",", "")
   num_pattern = "[-+]?[0-9]*\\.?[0-9]+([eE][-+]?[0-9]+)?"
-  matches = stringi::stri_extract_all_regex(text_no_comma, num_pattern, omit_empty = TRUE)
+  matches = stringi::stri_extract_all_regex(text_no_comma, num_pattern, omit_no_match = TRUE)
   lapply(matches, function(m) as.numeric(m))
 }
 
@@ -151,7 +152,8 @@ rme_ev_value_match_other_cmd = function(rme) {
     ) %>%
     rowwise() %>%
     mutate(
-      is_match = any(round(output_numbers[[1]], table_deci) == table_val, na.rm = TRUE)
+      #out_num = list(round(unlist(output_numbers),table_deci)),
+      is_match = any(round(unlist(output_numbers), table_deci) == table_val, na.rm = TRUE)
     ) %>%
     ungroup()
 
@@ -193,6 +195,7 @@ rme_ev_mapped_to_line_not_run = function(rme) {
   restore.point("rme_ev_mapped_to_line_not_run")
 
   long_descr = "**Mapped to Code Line but not a `runid`.** This flags cells that are mapped to a specific line in a script but are not associated with a `runid` (i.e., a specific execution output). While sometimes intentional for un-executed code, numeric cells in a results table should be mapped to a `runid`. If a numeric cell cannot be mapped to a specific `runid`, both `runid` and `code_line` should ideally be to indicate it belongs to the conceptual regression without a direct code link."
+  #map_reg_run = rme$map_reg_run
 
   issues = rme$map_reg_run %>%
     filter(is.na(runid) & !is.na(code_line)) %>%

@@ -30,6 +30,8 @@ unnest_comma_string_col = function(df, comma_string_col,sep=",") {
   if (!comma_string_col %in% colnames(df)) {
     return(df)
   }
+  if (NROW(df)==0) return(df)
+
 
   col_vec = df[[comma_string_col]]
   # Treat NA as empty string for consistent processing
